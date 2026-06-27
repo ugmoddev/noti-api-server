@@ -281,4 +281,20 @@ async function toggleApi(id) {
 }
 
 // Close modal on click outside
-document
+document.getElementById('apiKeyModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
+
+// Close modal on ESC key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeModal();
+    }
+});
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadUserApis();
+});
