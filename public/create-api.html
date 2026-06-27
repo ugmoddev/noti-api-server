@@ -32,7 +32,7 @@
 
             <div class="create-form-container">
                 <form id="createApiForm" class="create-form">
-                    <!-- Step 1: Thông tin cơ bản -->
+                    <!-- Phần 1: Thông tin cơ bản -->
                     <div class="form-section">
                         <div class="section-header">
                             <span class="step-badge">1</span>
@@ -48,9 +48,8 @@
                                 <input type="text" id="apiName" name="name" 
                                        placeholder="Ví dụ: my_noti_api" 
                                        class="input-field" required>
-                                <span class="input-validation"></span>
                             </div>
-                            <small><i class="fas fa-info-circle"></i> Chỉ chứa chữ cái, số và dấu gạch dưới</small>
+                            <small><i class="fas fa-info-circle"></i> Duy nhất (a-z, 0-9, _)</small>
                         </div>
 
                         <div class="form-group">
@@ -67,7 +66,7 @@
                         </div>
                     </div>
 
-                    <!-- Step 2: Webhook -->
+                    <!-- Phần 2: Webhook -->
                     <div class="form-section">
                         <div class="section-header">
                             <span class="step-badge">2</span>
@@ -83,35 +82,155 @@
                                 <input type="url" id="webhook" name="webhook" 
                                        placeholder="https://discord.com/api/webhooks/..." 
                                        class="input-field">
-                                <span class="input-suffix"><i class="fas fa-check-circle"></i></span>
                             </div>
                             <small><i class="fas fa-info-circle"></i> URL webhook để nhận thông báo khi có job mới</small>
                         </div>
+
+                        <div class="form-group">
+                            <label for="webhookCustom">
+                                <i class="fas fa-code"></i> Custom Webhook JSON
+                            </label>
+                            <div class="input-wrapper textarea-wrapper">
+                                <span class="input-icon"><i class="fas fa-brackets-curly"></i></span>
+                                <textarea id="webhookCustom" name="webhookCustom" rows="4" 
+                                          placeholder='{"content": "Job: {{job}} | Boss: {{boss}}"}'
+                                          class="input-field textarea-field"></textarea>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Custom JSON payload cho webhook. Hỗ trợ: {{job}}, {{boss}}, {{players}}, {{sea}}, {{time}}</small>
+                        </div>
                     </div>
 
-                    <!-- Step 3: Bảo mật -->
+                    <!-- Phần 3: Cấu hình job -->
                     <div class="form-section">
                         <div class="section-header">
                             <span class="step-badge">3</span>
+                            <h2><i class="fas fa-sliders-h"></i> Cấu hình Job</h2>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="prefix">
+                                    <i class="fas fa-outdent"></i> Prefix Job
+                                </label>
+                                <div class="input-wrapper">
+                                    <span class="input-icon"><i class="fas fa-forward"></i></span>
+                                    <input type="text" id="prefix" name="prefix" 
+                                           placeholder="PREFIX_" class="input-field">
+                                </div>
+                                <small>Thêm vào đầu job ID</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="suffix">
+                                    <i class="fas fa-indent"></i> Suffix Job
+                                </label>
+                                <div class="input-wrapper">
+                                    <span class="input-icon"><i class="fas fa-backward"></i></span>
+                                    <input type="text" id="suffix" name="suffix" 
+                                           placeholder="_SUFFIX" class="input-field">
+                                </div>
+                                <small>Thêm vào cuối job ID</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="encode">
+                                <i class="fas fa-code"></i> Encoding Map
+                            </label>
+                            <div class="input-wrapper textarea-wrapper">
+                                <span class="input-icon"><i class="fas fa-exchange-alt"></i></span>
+                                <textarea id="encode" name="encode" rows="2" 
+                                          placeholder='{"a":"b","c":"d"}'
+                                          class="input-field textarea-field"></textarea>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> JSON mapping để mã hóa job ID</small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="maxJobsPerBoss">
+                                    <i class="fas fa-layer-group"></i> Max Jobs / Boss
+                                </label>
+                                <div class="input-wrapper">
+                                    <span class="input-icon"><i class="fas fa-hashtag"></i></span>
+                                    <input type="number" id="maxJobsPerBoss" name="maxJobsPerBoss" 
+                                           value="0" min="0" class="input-field">
+                                </div>
+                                <small>0 = không giới hạn</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="maxTotalJobs">
+                                    <i class="fas fa-database"></i> Tổng Jobs tối đa
+                                </label>
+                                <div class="input-wrapper">
+                                    <span class="input-icon"><i class="fas fa-database"></i></span>
+                                    <input type="number" id="maxTotalJobs" name="maxTotalJobs" 
+                                           value="0" min="0" class="input-field">
+                                </div>
+                                <small>0 = không giới hạn</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="jobSort">
+                                <i class="fas fa-sort"></i> Thứ tự Job
+                            </label>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-arrows-alt-v"></i></span>
+                                <select id="jobSort" name="jobSort" class="input-field">
+                                    <option value="desc">Mới nhất trước</option>
+                                    <option value="asc">Cũ nhất trước</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Phần 4: Bảo mật -->
+                    <div class="form-section">
+                        <div class="section-header">
+                            <span class="step-badge">4</span>
                             <h2><i class="fas fa-shield-alt"></i> Bảo mật</h2>
                         </div>
-                        
-                        <div class="form-group toggle-group">
-                            <label class="toggle-label">
-                                <span class="toggle-text">
-                                    <i class="fas fa-lock"></i> Chế độ riêng tư
-                                </span>
-                                <div class="toggle-switch">
-                                    <input type="checkbox" id="privateMode" name="privateMode" class="toggle-input">
-                                    <span class="toggle-slider"></span>
-                                </div>
+
+                        <div class="form-group">
+                            <label>
+                                <i class="fas fa-globe"></i> Quyền truy cập
                             </label>
-                            <small><i class="fas fa-info-circle"></i> Chỉ cho phép IP được whitelist truy cập</small>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="privateMode" value="false" checked>
+                                    <span class="radio-custom"></span>
+                                    <span class="radio-text">
+                                        <i class="fas fa-globe-americas"></i> Public
+                                    </span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="privateMode" value="true">
+                                    <span class="radio-custom"></span>
+                                    <span class="radio-text">
+                                        <i class="fas fa-lock"></i> Private
+                                    </span>
+                                </label>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Private: Chỉ cho phép IP được whitelist truy cập</small>
+                        </div>
+
+                        <div class="form-group" id="viewIPGroup" style="display:none;">
+                            <label for="viewIP">
+                                <i class="fas fa-eye"></i> View IP
+                            </label>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-ip-address"></i></span>
+                                <input type="text" id="viewIP" name="viewIP" 
+                                       placeholder="192.168.1.1" class="input-field">
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> IP được phép xem dữ liệu (cho phép 1 IP)</small>
                         </div>
 
                         <div class="form-group" id="whitelistGroup" style="display:none;">
                             <label for="whitelistIPs">
-                                <i class="fas fa-list"></i> Danh sách IP được phép
+                                <i class="fas fa-list"></i> Whitelist IPs (mỗi dòng 1 IP)
                             </label>
                             <div class="input-wrapper textarea-wrapper">
                                 <span class="input-icon"><i class="fas fa-network-wired"></i></span>
@@ -120,6 +239,56 @@
                                           class="input-field textarea-field"></textarea>
                             </div>
                             <small><i class="fas fa-info-circle"></i> Mỗi IP một dòng</small>
+                        </div>
+                    </div>
+
+                    <!-- Phần 5: Tùy chỉnh nâng cao -->
+                    <div class="form-section">
+                        <div class="section-header">
+                            <span class="step-badge">5</span>
+                            <h2><i class="fas fa-cogs"></i> Tùy chỉnh nâng cao</h2>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="customFields">
+                                <i class="fas fa-edit"></i> Custom Fields (phân cách dấu phẩy)
+                            </label>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-columns"></i></span>
+                                <input type="text" id="customFields" name="customFields" 
+                                       placeholder="field1, field2, field3" class="input-field">
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Chỉ hiển thị các field được chỉ định trong response</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ttl">
+                                <i class="fas fa-clock"></i> Thời gian sống (TTL) - ms
+                            </label>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-hourglass"></i></span>
+                                <input type="number" id="ttl" name="ttl" 
+                                       value="60000" min="1000" class="input-field">
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Thời gian job tồn tại (ms). Mặc định: 60000</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <i class="fas fa-trash-alt"></i> Xóa job trùng lặp
+                            </label>
+                            <div class="toggle-group">
+                                <label class="toggle-label">
+                                    <span class="toggle-text">
+                                        <i class="fas fa-check-circle"></i> Remove Duplicate
+                                    </span>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="removeDuplicate" name="removeDuplicate" checked class="toggle-input">
+                                        <span class="toggle-slider"></span>
+                                    </div>
+                                </label>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Chỉ giữ lại job mới nhất cho mỗi boss</small>
                         </div>
                     </div>
 
