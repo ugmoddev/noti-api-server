@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập - NOTI API Server</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🚀</span>
+                <span class="brand-text">NOTI API</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="/">Trang chủ</a></li>
+                <li><a href="/dashboard.html">Dashboard</a></li>
+                <li><a href="/create-api.html">Tạo API</a></li>
+                <li><a href="/login.html" class="active">Đăng nhập</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="auth-page">
+        <div class="container">
+            <div class="auth-container">
+                <div class="auth-header">
+                    <div class="auth-icon">🔐</div>
+                    <h1>Đăng nhập</h1>
+                    <p class="auth-subtitle">Đăng nhập để tạo và quản lý API của bạn</p>
+                </div>
+
+                <!-- Login Form -->
+                <div class="auth-form-container" id="loginForm">
+                    <form id="loginFormElement" class="auth-form">
+                        <div class="form-group floating-group">
+                            <div class="floating-input-wrapper">
+                                <input type="text" id="loginUsername" name="username" 
+                                       placeholder=" " class="floating-input" required>
+                                <label for="loginUsername" class="floating-label">
+                                    <i class="fas fa-user"></i> Tên đăng nhập
+                                </label>
+                                <div class="input-border"></div>
+                            </div>
+                        </div>
+
+                        <div class="form-group floating-group">
+                            <div class="floating-input-wrapper">
+                                <input type="password" id="loginPassword" name="password" 
+                                       placeholder=" " class="floating-input" required>
+                                <label for="loginPassword" class="floating-label">
+                                    <i class="fas fa-lock"></i> Mật khẩu
+                                </label>
+                                <div class="input-border"></div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-submit full-width">
+                            <i class="fas fa-sign-in-alt"></i>
+                            <span>Đăng nhập</span>
+                            <span class="btn-shimmer"></span>
+                        </button>
+                    </form>
+
+                    <div class="auth-switch">
+                        <span>Chưa có tài khoản?</span>
+                        <button onclick="switchToRegister()" class="auth-switch-btn">Đăng ký ngay</button>
+                    </div>
+                </div>
+
+                <!-- Register Form -->
+                <div class="auth-form-container" id="registerForm" style="display:none;">
+                    <form id="registerFormElement" class="auth-form">
+                        <div class="form-group floating-group">
+                            <div class="floating-input-wrapper">
+                                <input type="text" id="registerUsername" name="username" 
+                                       placeholder=" " class="floating-input" required>
+                                <label for="registerUsername" class="floating-label">
+                                    <i class="fas fa-user"></i> Tên đăng nhập
+                                </label>
+                                <div class="input-border"></div>
+                            </div>
+                            <div class="input-helper">
+                                <i class="fas fa-info-circle"></i>
+                                <span>Chỉ chứa chữ cái, số và dấu gạch dưới</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group floating-group">
+                            <div class="floating-input-wrapper">
+                                <input type="password" id="registerPassword" name="password" 
+                                       placeholder=" " class="floating-input" required>
+                                <label for="registerPassword" class="floating-label">
+                                    <i class="fas fa-lock"></i> Mật khẩu
+                                </label>
+                                <div class="input-border"></div>
+                            </div>
+                            <div class="input-helper">
+                                <i class="fas fa-info-circle"></i>
+                                <span>Ít nhất 8 ký tự</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group floating-group">
+                            <div class="floating-input-wrapper">
+                                <input type="password" id="registerConfirmPassword" 
+                                       placeholder=" " class="floating-input" required>
+                                <label for="registerConfirmPassword" class="floating-label">
+                                    <i class="fas fa-check-circle"></i> Xác nhận mật khẩu
+                                </label>
+                                <div class="input-border"></div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-submit full-width">
+                            <i class="fas fa-user-plus"></i>
+                            <span>Đăng ký</span>
+                            <span class="btn-shimmer"></span>
+                        </button>
+                    </form>
+
+                    <div class="auth-switch">
+                        <span>Đã có tài khoản?</span>
+                        <button onclick="switchToLogin()" class="auth-switch-btn">Đăng nhập</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============ DOM Elements ============
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const loginFormElement = document.getElementById('loginFormElement');
+        const registerFormElement = document.getElementById('registerFormElement');
+
+        // ============ Switch Forms ============
+        function switchToRegister() {
+            loginForm.style.display = 'none';
+            registerForm.style.display = 'block';
+        }
+
+        function switchToLogin() {
+            loginForm.style.display = 'block';
+            registerForm.style.display = 'none';
+        }
+
+        // ============ Toast Notification ============
+        function showToast(message, type = 'success') {
+            const existing = document.querySelector('.toast');
+            if (existing) existing.remove();
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icons = {
+                success: 'fas fa-check-circle',
+                error: 'fas fa-exclamation-circle',
+                warning: 'fas fa-exclamation-triangle',
+                info: 'fas fa-info-circle'
+            };
+            
+            toast.innerHTML = `
+                <i class="${icons[type] || icons.success}"></i>
+                <span>${message}</span>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) toast.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        // ============ Login ============
+        loginFormElement.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = loginFormElement.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đăng nhập...';
+            submitBtn.disabled = true;
+
+            try {
+                const formData = new FormData(loginFormElement);
+                const data = Object.fromEntries(formData.entries());
+
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Save token
+                    localStorage.setItem('token', result.data.token);
+                    localStorage.setItem('username', result.data.username);
+                    
+                    showToast('✅ Đăng nhập thành công!');
+                    
+                    // Redirect after 1 second
+                    setTimeout(() => {
+                        window.location.href = '/create-api.html';
+                    }, 1000);
+                } else {
+                    showToast('❌ ' + (result.message || 'Đăng nhập thất bại'), 'error');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showToast('❌ Đã xảy ra lỗi: ' + error.message, 'error');
+            } finally {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }
+        });
+
+        // ============ Register ============
+        registerFormElement.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = registerFormElement.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đăng ký...';
+            submitBtn.disabled = true;
+
+            try {
+                const formData = new FormData(registerFormElement);
+                const data = Object.fromEntries(formData.entries());
+                
+                // Check password match
+                if (data.password !== document.getElementById('registerConfirmPassword').value) {
+                    showToast('❌ Mật khẩu xác nhận không khớp!', 'error');
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('✅ Đăng ký thành công! Vui lòng đăng nhập.');
+                    
+                    // Clear register form
+                    registerFormElement.reset();
+                    
+                    // Switch to login
+                    setTimeout(() => {
+                        switchToLogin();
+                    }, 1000);
+                } else {
+                    showToast('❌ ' + (result.message || 'Đăng ký thất bại'), 'error');
+                }
+            } catch (error) {
+                console.error('Register error:', error);
+                showToast('❌ Đã xảy ra lỗi: ' + error.message, 'error');
+            } finally {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }
+        });
+
+        // ============ Check if already logged in ============
+        document.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                // Check if token is still valid
+                fetch('/api/me', {
+                    headers: {
+                        'Authorization': token
+                    }
+                }).then(res => {
+                    if (res.ok) {
+                        // Already logged in, redirect to create API
+                        window.location.href = '/create-api.html';
+                    } else {
+                        // Token invalid, clear storage
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('username');
+                    }
+                }).catch(() => {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('username');
+                });
+            }
+        });
+    </script>
+</body>
+</html>
