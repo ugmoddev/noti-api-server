@@ -1,8 +1,524 @@
 /* ============================================ */
-/* ============ WEBHOOK INPUT STYLES ========== */
+/* ============ RESET & BASE ================== */
 /* ============================================ */
 
-/* Webhook URL Input với icon bên trong */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* ============================================ */
+/* ============ NAVBAR ======================== */
+/* ============================================ */
+
+.navbar {
+    background: rgba(15, 15, 25, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 16px 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.navbar .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo {
+    font-size: 28px;
+}
+
+.brand-text {
+    font-size: 20px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.nav-links {
+    display: flex;
+    list-style: none;
+    gap: 30px;
+    align-items: center;
+}
+
+.nav-links a {
+    color: #a0a0b0;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.3s;
+    position: relative;
+}
+
+.nav-links a:hover {
+    color: #e0e0e0;
+}
+
+.nav-links a.active {
+    color: #8b5cf6;
+}
+
+.nav-links a.active::after {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #8b5cf6;
+    border-radius: 2px;
+}
+
+/* ============================================ */
+/* ============ HERO SECTION ================== */
+/* ============================================ */
+
+.hero {
+    padding: 80px 0 60px;
+    text-align: center;
+    background: radial-gradient(ellipse at top, rgba(99, 102, 241, 0.1), transparent 70%);
+}
+
+.hero h1 {
+    font-size: 56px;
+    font-weight: 800;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #fff, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    font-size: 20px;
+    color: #9090a0;
+    margin-bottom: 40px;
+}
+
+.hero-buttons {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* ============================================ */
+/* ============ BUTTONS ======================= */
+/* ============================================ */
+
+.btn {
+    display: inline-block;
+    padding: 14px 32px;
+    border-radius: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.3s;
+    cursor: pointer;
+    border: none;
+    font-size: 16px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 30px rgba(99, 102, 241, 0.4);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    color: #e0e0e0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ============================================ */
+/* ============ HERO STATS ==================== */
+/* ============================================ */
+
+.hero-stats {
+    display: flex;
+    gap: 40px;
+    justify-content: center;
+    margin-top: 60px;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-value {
+    display: block;
+    font-size: 36px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.stat-label {
+    color: #9090a0;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+/* ============================================ */
+/* ============ FEATURES ====================== */
+/* ============================================ */
+
+.features {
+    padding: 60px 0;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.section-title {
+    text-align: center;
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 48px;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+}
+
+.feature-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.feature-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(-4px);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+.feature-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+}
+
+.feature-card h3 {
+    font-size: 20px;
+    margin-bottom: 8px;
+    color: #fff;
+}
+
+.feature-card p {
+    color: #9090a0;
+}
+
+/* ============================================ */
+/* ============ FOOTER ======================== */
+/* ============================================ */
+
+.footer {
+    padding: 40px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    text-align: center;
+    color: #606070;
+}
+
+/* ============================================ */
+/* ============ RESPONSIVE ==================== */
+/* ============================================ */
+
+@media (max-width: 768px) {
+    .hero h1 {
+        font-size: 36px;
+    }
+    
+    .hero-stats {
+        gap: 20px;
+    }
+    
+    .stat-value {
+        font-size: 28px;
+    }
+    
+    .nav-links {
+        gap: 16px;
+    }
+    
+    .features-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .hero h1 {
+        font-size: 28px;
+    }
+    
+    .subtitle {
+        font-size: 16px;
+    }
+    
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .hero-stats {
+        gap: 16px;
+    }
+    
+    .stat-value {
+        font-size: 22px;
+    }
+    
+    .nav-links {
+        gap: 10px;
+        font-size: 14px;
+    }
+    
+    .btn {
+        padding: 12px 24px;
+        font-size: 14px;
+    }
+}
+
+/* ============================================ */
+/* ============ ADDITIONAL STYLES ============= */
+/* ============================================ */
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(139, 92, 246, 0.5);
+}
+
+/* Selection */
+::selection {
+    background: rgba(139, 92, 246, 0.3);
+    color: #fff;
+}
+
+/* ============================================ */
+/* ============ LOGIN PAGE ==================== */
+/* ============================================ */
+
+.auth-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
+    padding: 40px 0;
+}
+
+.auth-container {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 48px;
+    max-width: 440px;
+    width: 100%;
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.auth-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.auth-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+}
+
+.auth-subtitle {
+    color: #9090a0;
+    font-size: 14px;
+}
+
+.auth-form .form-group {
+    margin-bottom: 20px;
+}
+
+.auth-form .btn-submit {
+    width: 100%;
+    justify-content: center;
+    padding: 14px;
+}
+
+.auth-switch {
+    text-align: center;
+    margin-top: 20px;
+    color: #9090a0;
+    font-size: 14px;
+}
+
+.auth-switch-btn {
+    background: none;
+    border: none;
+    color: #8b5cf6;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.3s;
+}
+
+.auth-switch-btn:hover {
+    color: #a78bfa;
+}
+
+/* ============================================ */
+/* ============ FLOATING INPUT ================ */
+/* ============================================ */
+
+.floating-group {
+    margin-bottom: 24px;
+}
+
+.floating-input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.floating-input {
+    width: 100%;
+    padding: 16px 18px 8px 18px;
+    background: rgba(255, 255, 255, 0.03);
+    border: none;
+    border-radius: 12px;
+    color: #e0e0e0;
+    font-size: 15px;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    height: 56px;
+    z-index: 1;
+    position: relative;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.floating-input:focus {
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3);
+}
+
+.floating-input:focus + .floating-label,
+.floating-input:not(:placeholder-shown) + .floating-label {
+    transform: translateY(-10px) scale(0.85);
+    color: #8b5cf6;
+}
+
+.floating-input:focus + .floating-label + .input-border {
+    transform: scaleX(1);
+}
+
+.floating-input:not(:placeholder-shown) + .floating-label {
+    color: #a0a0b0;
+}
+
+.floating-label {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6b6b80;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.floating-label i {
+    color: #8b5cf6;
+    font-size: 13px;
+}
+
+.floating-label .required {
+    color: #ef4444;
+}
+
+.input-border {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    transform: scaleX(0);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 3;
+    border-radius: 0 0 12px 12px;
+}
+
+.input-helper {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6b6b80;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.input-helper i {
+    font-size: 11px;
+    color: #8b5cf6;
+}
+
+/* ============================================ */
+/* ============ WEBHOOK INPUT ================= */
+/* ============================================ */
+
 .url-input {
     position: relative;
     display: flex;
@@ -85,7 +601,6 @@
     font-family: 'Inter', sans-serif;
 }
 
-/* Webhook Preview */
 .webhook-preview {
     margin-top: 8px;
     padding: 8px 14px;
@@ -114,7 +629,6 @@
     color: #8b5cf6;
 }
 
-/* Webhook Test Section */
 .webhook-test-section {
     display: flex;
     align-items: center;
@@ -170,19 +684,6 @@
     transform: scale(0.97);
 }
 
-.btn-test-webhook i {
-    font-size: 15px;
-}
-
-.btn-test-webhook .fa-paper-plane {
-    transition: transform 0.3s ease;
-}
-
-.btn-test-webhook:hover .fa-paper-plane {
-    transform: translate(2px, -2px);
-}
-
-/* Webhook status */
 .webhook-status {
     font-size: 13px;
     font-weight: 500;
@@ -193,43 +694,62 @@
     gap: 6px;
 }
 
-.webhook-status i {
-    font-size: 14px;
-}
-
 .webhook-status.success {
     color: #22c55e;
-    animation: statusPop 0.3s ease;
 }
 
 .webhook-status.error {
     color: #ef4444;
-    animation: statusPop 0.3s ease;
 }
 
 .webhook-status.loading {
     color: #f59e0b;
 }
 
-@keyframes statusPop {
-    0% { transform: scale(0.8); opacity: 0; }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); opacity: 1; }
+/* ============================================ */
+/* ============ TOAST ========================= */
+/* ============================================ */
+
+.toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #1a1a2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    z-index: 2000;
+    max-width: 400px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* Webhook URL validation states */
-.floating-input-wrapper.webhook-valid {
-    border-color: #22c55e;
+.toast.show {
+    transform: translateY(0);
+    opacity: 1;
 }
 
-.floating-input-wrapper.webhook-valid .input-icon i {
+.toast i {
+    font-size: 20px;
+}
+
+.toast.success i {
     color: #22c55e;
 }
 
-.floating-input-wrapper.webhook-invalid {
-    border-color: #ef4444;
+.toast.error i {
+    color: #ef4444;
 }
 
-.floating-input-wrapper.webhook-invalid .input-icon i {
-    color: #ef4444;
+.toast.warning i {
+    color: #f59e0b;
+}
+
+.toast.info i {
+    color: #8b5cf6;
 }
