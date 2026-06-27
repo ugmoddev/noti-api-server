@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tạo API - NOTI API Server</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🚀</span>
+                <span class="brand-text">NOTI API</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="/">Trang chủ</a></li>
+                <li><a href="/dashboard.html">Dashboard</a></li>
+                <li><a href="/create-api.html" class="active">Tạo API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="create-api-page">
+        <div class="container">
+            <div class="page-header">
+                <h1><i class="fas fa-plus-circle"></i> Tạo API mới</h1>
+                <p class="subtitle">Tạo API key và cấu hình thông báo cho NOTI script</p>
+            </div>
+
+            <div class="create-form-container">
+                <form id="createApiForm" class="create-form">
+                    <div class="form-section">
+                        <h2><i class="fas fa-info-circle"></i> Thông tin cơ bản</h2>
+                        
+                        <div class="form-group">
+                            <label for="apiName">
+                                <i class="fas fa-tag"></i> Tên API <span class="required">*</span>
+                            </label>
+                            <input type="text" id="apiName" name="name" 
+                                   placeholder="Ví dụ: my_noti_api" required>
+                            <small>Chỉ chứa chữ cái, số và dấu gạch dưới</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="displayName">
+                                <i class="fas fa-eye"></i> Tên hiển thị
+                            </label>
+                            <input type="text" id="displayName" name="displayName" 
+                                   placeholder="Ví dụ: API Thông báo của tôi">
+                            <small>Tên hiển thị trên dashboard</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="webhook">
+                                <i class="fas fa-bell"></i> Webhook URL
+                            </label>
+                            <input type="url" id="webhook" name="webhook" 
+                                   placeholder="https://discord.com/api/webhooks/...">
+                            <small>URL webhook để nhận thông báo khi có job mới</small>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h2><i class="fas fa-shield-alt"></i> Bảo mật</h2>
+                        
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="privateMode" name="privateMode">
+                                <i class="fas fa-lock"></i> Chế độ riêng tư
+                            </label>
+                            <small>Chỉ cho phép IP được whitelist truy cập</small>
+                        </div>
+
+                        <div class="form-group" id="whitelistGroup" style="display:none;">
+                            <label for="whitelistIPs">
+                                <i class="fas fa-list"></i> Whitelist IPs
+                            </label>
+                            <textarea id="whitelistIPs" name="whitelistIPs" rows="3" 
+                                      placeholder="192.168.1.1&#10;10.0.0.1"></textarea>
+                            <small>Mỗi IP một dòng</small>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary btn-large">
+                            <i class="fas fa-plus"></i> Tạo API
+                        </button>
+                        <button type="reset" class="btn btn-secondary">
+                            <i class="fas fa-undo"></i> Đặt lại
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="api-list-container">
+                <h2><i class="fas fa-list"></i> API của bạn</h2>
+                <div id="apiList" class="api-list">
+                    <p class="loading-text">Đang tải danh sách API...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="apiKeyModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-key"></i> API Key đã tạo</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>API của bạn đã được tạo thành công!</p>
+                <div class="api-key-display">
+                    <strong>API ID:</strong> <span id="newApiId"></span><br>
+                    <strong>API Key:</strong> 
+                    <div class="key-container">
+                        <code id="newApiKey"></code>
+                        <button onclick="copyApiKey()" class="btn btn-small">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <div class="api-link-display">
+                    <strong>API Link:</strong>
+                    <code id="newApiLink"></code>
+                </div>
+                <div class="modal-actions">
+                    <button onclick="closeModal()" class="btn btn-primary">
+                        <i class="fas fa-check"></i> OK
+                    </button>
+                    <button onclick="window.location.href='/dashboard.html'" class="btn btn-secondary">
+                        <i class="fas fa-chart-bar"></i> Xem Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/create-api.js"></script>
+</body>
+</html>

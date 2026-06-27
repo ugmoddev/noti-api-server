@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOTI API - Dashboard</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🚀</span>
+                <span class="brand-text">NOTI API</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="/">Trang chủ</a></li>
+                <li><a href="/dashboard.html" class="active">Dashboard</a></li>
+                <li><a href="/create-api.html">Tạo API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="dashboard">
+        <div class="container">
+            <div class="dashboard-header">
+                <h1>📊 Dashboard</h1>
+                <div class="dashboard-actions">
+                    <button onclick="refreshData()" class="btn btn-primary">🔄 Refresh</button>
+                    <button onclick="clearData()" class="btn btn-danger">🗑️ Clear Data</button>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="totalNotifications">0</span>
+                        <span class="stat-label">Tổng thông báo</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🖥️</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="activeServers">0</span>
+                        <span class="stat-label">Server đang hoạt động</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">👾</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="uniqueBosses">0</span>
+                        <span class="stat-label">Boss đã xuất hiện</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏱️</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="lastUpdate">-</span>
+                        <span class="stat-label">Cập nhật lần cuối</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3>Phân phối theo Sea</h3>
+                    <canvas id="seaChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Top 10 Boss xuất hiện nhiều nhất</h3>
+                    <canvas id="bossChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Recent Notifications -->
+            <div class="recent-section">
+                <h3>🕐 Thông báo gần đây</h3>
+                <div class="table-container">
+                    <table class="notifications-table">
+                        <thead>
+                            <tr>
+                                <th>Boss</th>
+                                <th>Sea</th>
+                                <th>Players</th>
+                                <th>Server</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentNotifications">
+                            <tr>
+                                <td colspan="5" class="loading-text">Đang tải dữ liệu...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- All Notifications -->
+            <div class="all-section">
+                <h3>📋 Tất cả thông báo</h3>
+                <div class="filter-bar">
+                    <select id="seaFilter" onchange="loadNotifications()">
+                        <option value="">Tất cả Sea</option>
+                        <option value="1">Sea 1</option>
+                        <option value="2">Sea 2</option>
+                        <option value="3">Sea 3</option>
+                    </select>
+                    <input type="text" id="bossFilter" placeholder="Lọc theo Boss..." oninput="loadNotifications()">
+                    <div class="pagination-controls">
+                        <button onclick="prevPage()" class="btn btn-small">◀</button>
+                        <span id="pageInfo">Trang 1</span>
+                        <button onclick="nextPage()" class="btn btn-small">▶</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="notifications-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Boss</th>
+                                <th>Sea</th>
+                                <th>Players</th>
+                                <th>Server</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allNotifications">
+                            <tr>
+                                <td colspan="6" class="loading-text">Đang tải dữ liệu...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination-info" id="paginationInfo">
+                    Hiển thị 0-0 trên tổng 0 thông báo
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>

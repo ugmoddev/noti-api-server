@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOTI API Server - Trang chủ</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🚀</span>
+                <span class="brand-text">NOTI API</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="/" class="active">Trang chủ</a></li>
+                <li><a href="/dashboard.html">Dashboard</a></li>
+                <li><a href="/create-api.html">Tạo API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>NOTI API Server</h1>
+                <p class="subtitle">Hệ thống nhận và quản lý thông báo từ NOTI Script cho Blox Fruits</p>
+                <div class="hero-buttons">
+                    <a href="/dashboard.html" class="btn btn-primary">📊 Mở Dashboard</a>
+                    <a href="/create-api.html" class="btn btn-secondary">➕ Tạo API</a>
+                </div>
+                <div class="hero-stats" id="heroStats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="totalNotifications">0</span>
+                        <span class="stat-label">Tổng thông báo</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="activeServers">0</span>
+                        <span class="stat-label">Server đang hoạt động</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="uniqueBosses">0</span>
+                        <span class="stat-label">Boss đã xuất hiện</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="serverUptime">0</span>
+                        <span class="stat-label">Uptime</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Tính năng nổi bật</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📡</div>
+                    <h3>Nhận thông báo</h3>
+                    <p>Nhận thông báo từ NOTI script theo thời gian thực</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Dashboard</h3>
+                    <p>Xem thống kê chi tiết với biểu đồ trực quan</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔍</div>
+                    <h3>Lọc dữ liệu</h3>
+                    <p>Lọc thông báo theo Boss, Sea và thời gian</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💾</div>
+                    <h3>Lưu trữ</h3>
+                    <p>Lưu trữ và xuất dữ liệu khi cần thiết</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="docs" class="docs">
+        <div class="container">
+            <h2 class="section-title">Hướng dẫn sử dụng</h2>
+            <div class="docs-content">
+                <div class="doc-section">
+                    <h3>1. Push Notification</h3>
+                    <div class="code-block">
+                        <button class="copy-btn" onclick="copyCode(this)">📋 Copy</button>
+                        <pre><code>curl -X POST https://your-api.onrender.com/api/push \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "b2b24895f69e",
+    "apiKey": "87ebc4e597aab91a0aae0900ee6c6753bdb6527cf02d8aa18bf617bf57a57005",
+    "job": "game_job_id",
+    "players": 5,
+    "sea": 2,
+    "boss": "darkbeard"
+  }'</code></pre>
+                    </div>
+                </div>
+
+                <div class="doc-section">
+                    <h3>2. Get Notifications</h3>
+                    <div class="code-block">
+                        <button class="copy-btn" onclick="copyCode(this)">📋 Copy</button>
+                        <pre><code># Lấy tất cả
+curl https://your-api.onrender.com/api/notifications
+
+# Lọc theo Sea
+curl https://your-api.onrender.com/api/notifications?sea=3
+
+# Lọc theo Boss
+curl https://your-api.onrender.com/api/notifications?boss=darkbeard</code></pre>
+                    </div>
+                </div>
+
+                <div class="doc-section">
+                    <h3>3. Update NOTI Script</h3>
+                    <div class="code-block">
+                        <button class="copy-btn" onclick="copyCode(this)">📋 Copy</button>
+                        <pre><code>local API = {
+    url = "https://your-api.onrender.com",
+    id = "b2b24895f69e",
+    key = "87ebc4e597aab91a0aae0900ee6c6753bdb6527cf02d8aa18bf617bf57a57005"
+}</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 NOTI API Server. Made with ❤️</p>
+        </div>
+    </footer>
+
+    <script>
+        // Load stats on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                if (data.success) {
+                    const stats = data.data.stats;
+                    document.getElementById('totalNotifications').textContent = stats.totalNotifications || 0;
+                    document.getElementById('activeServers').textContent = stats.activeServers || 0;
+                    document.getElementById('uniqueBosses').textContent = stats.uniqueBosses || 0;
+                    
+                    // Calculate uptime
+                    const uptime = Math.floor(process.uptime());
+                    const days = Math.floor(uptime / 86400);
+                    const hours = Math.floor((uptime % 86400) / 3600);
+                    const minutes = Math.floor((uptime % 3600) / 60);
+                    document.getElementById('serverUptime').textContent = 
+                        `${days}d ${hours}h ${minutes}m`;
+                }
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        });
+
+        function copyCode(btn) {
+            const codeBlock = btn.parentElement.querySelector('code');
+            const text = codeBlock.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    btn.textContent = '📋 Copy';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
