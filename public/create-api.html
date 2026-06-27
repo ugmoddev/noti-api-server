@@ -89,7 +89,7 @@
                         </div>
                     </div>
 
-                    <!-- Phần 2: Webhook -->
+                    <!-- ==================== PHẦN WEBHOOK (ĐÃ SỬA) ==================== -->
                     <div class="form-section">
                         <div class="section-header">
                             <div class="step-indicator">
@@ -99,21 +99,30 @@
                             <h2>Webhook</h2>
                         </div>
                         
+                        <!-- Webhook URL Input với icon và prefix -->
                         <div class="form-group floating-group">
-                            <div class="floating-input-wrapper">
-                                <input type="url" id="webhook" name="webhook" 
-                                       placeholder=" " class="floating-input">
+                            <div class="floating-input-wrapper url-input">
+                                <span class="input-icon"><i class="fas fa-link"></i></span>
+                                <span class="webhook-prefix">
+                                    <i class="fas fa-lock"></i> https://
+                                </span>
+                                <input type="text" id="webhook" name="webhook" 
+                                       placeholder=" " class="floating-input webhook-input"
+                                       spellcheck="false">
                                 <label for="webhook" class="floating-label">
                                     <i class="fas fa-bell"></i> Webhook URL
                                 </label>
                                 <div class="input-border"></div>
-                                <div class="input-helper">
-                                    <i class="fas fa-info-circle"></i>
-                                    <span>URL webhook để nhận thông báo khi có job mới</span>
-                                </div>
                             </div>
+                            <div class="input-helper">
+                                <i class="fas fa-info-circle"></i>
+                                <span>Nhập URL webhook để nhận thông báo</span>
+                            </div>
+                            <!-- Webhook Preview -->
+                            <div class="webhook-preview" id="webhookPreview"></div>
                         </div>
 
+                        <!-- Custom Webhook JSON -->
                         <div class="form-group floating-group">
                             <div class="floating-input-wrapper">
                                 <textarea id="webhookCustom" name="webhookCustom" rows="3" 
@@ -128,7 +137,17 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Webhook Test Button -->
+                        <div class="webhook-test-section">
+                            <button type="button" onclick="testWebhook()" class="btn-test-webhook">
+                                <i class="fas fa-paper-plane"></i>
+                                Test Webhook
+                            </button>
+                            <span class="webhook-status" id="webhookStatus"></span>
+                        </div>
                     </div>
+                    <!-- ==================== KẾT THÚC PHẦN WEBHOOK ==================== -->
 
                     <!-- Phần 3: Cấu hình Job -->
                     <div class="form-section">
