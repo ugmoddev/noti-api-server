@@ -19,6 +19,8 @@
                 <li><a href="/">Trang chủ</a></li>
                 <li><a href="/dashboard.html">Dashboard</a></li>
                 <li><a href="/create-api.html" class="active">Tạo API</a></li>
+                <li><a href="/login.html" id="navLogin">Đăng nhập</a></li>
+                <li><a href="#" id="navLogout" style="display:none;" onclick="logout()">Đăng xuất</a></li>
             </ul>
         </div>
     </nav>
@@ -26,8 +28,22 @@
     <div class="create-api-page">
         <div class="container">
             <div class="page-header">
-                <h1><i class="fas fa-plus-circle"></i> Tạo API mới</h1>
-                <p class="subtitle">Tạo API key và cấu hình thông báo cho NOTI script</p>
+                <div class="header-left">
+                    <h1><i class="fas fa-plus-circle"></i> Tạo API mới</h1>
+                    <p class="subtitle">Tạo API key và cấu hình thông báo cho NOTI script</p>
+                </div>
+                <div class="header-right">
+                    <span class="user-badge" id="userBadge">
+                        <i class="fas fa-user"></i>
+                        <span id="usernameDisplay">Guest</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- API Limit Info -->
+            <div class="api-limit-info" id="apiLimitInfo">
+                <i class="fas fa-info-circle"></i>
+                <span>Đang tải thông tin...</span>
             </div>
 
             <div class="create-form-container">
@@ -100,8 +116,8 @@
 
                         <div class="form-group floating-group">
                             <div class="floating-input-wrapper">
-                                <textarea id="webhookCustom" name="webhookCustom" 
-                                          rows="3" placeholder=" " class="floating-input floating-textarea"></textarea>
+                                <textarea id="webhookCustom" name="webhookCustom" rows="3" 
+                                          placeholder=" " class="floating-input floating-textarea"></textarea>
                                 <label for="webhookCustom" class="floating-label">
                                     <i class="fas fa-code"></i> Custom Webhook JSON
                                 </label>
@@ -331,7 +347,7 @@
 
                     <!-- Form Actions -->
                     <div class="form-actions">
-                        <button type="submit" class="btn-submit">
+                        <button type="submit" class="btn-submit" id="submitBtn">
                             <i class="fas fa-plus"></i>
                             <span>Tạo API</span>
                             <span class="btn-shimmer"></span>
@@ -406,6 +422,7 @@
         </div>
     </div>
 
+    <script src="/js/api.js"></script>
     <script src="/js/create-api.js"></script>
 </body>
 </html>
