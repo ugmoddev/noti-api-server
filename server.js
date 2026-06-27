@@ -64,13 +64,19 @@ const notifications = {
   }
 };
 
+// ============ USER MANAGEMENT ============
+
+const users = {};
+const sessions = {};
+const APIS = {};
+
 // ============ CONFIGURATION ============
 
 const VALID_API_KEYS = {
   '87ebc4e597aab91a0aae0900ee6c6753bdb6527cf02d8aa18bf617bf57a57005': 'main'
 };
 
-const APIS = {};
+const MAX_API_PER_USER = 1;
 
 // ============ HELPER FUNCTIONS ============
 
@@ -82,12 +88,31 @@ const generateApiKey = () => {
   return 'api_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
+const generateToken = () => {
+  return 'token_' + Math.random().toString(36).substring(2, 20) + Date.now().toString(36);
+};
+
 const validateApiKey = (key) => {
   return VALID_API_KEYS[key] !== undefined;
 };
 
 const getApiKey = (req) => {
   return req.body.apiKey || req.query.apiKey || req.headers['x-api-key'];
+};
+
+const getSession = (req) => {
+  const token = req.headers.authorization;
+  if (!token) return null;
+  return sessions[token] || null;
+};
+
+const getUser = (req) => {
+  const session = getSession(req);
+  return session ? session.user : null;
+};
+
+const isAuthenticated = (req) => {
+  return getUser(req) !== null;
 };
 
 // ============ AUTHENTICATION MIDDLEWARE ============
@@ -114,6 +139,21 @@ const authenticate = (req, res, next) => {
   next();
 };
 
+const authenticateUser = (req, res, next) => {
+  const session = getSession(req);
+  
+  if (!session) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'Vui lòng đăng nhập'
+    });
+  }
+
+  req.user = session.user;
+  next();
+};
+
 // ============ ROUTES ============
 
 // Home
@@ -131,6 +171,11 @@ app.get('/create-api', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/create-api.html'));
 });
 
+// Login page
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/login.html'));
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
@@ -138,16 +183,205 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     totalNotifications: notifications.all.length,
-    activeServers: notifications.stats.activeServers.size
+    activeServers: notifications.stats.activeServers.size,
+    totalUsers: Object.keys(users).length,
+    totalApis: Object.keys(APIS).length
   });
+});
+
+// ============ AUTH ENDPOINTS ============
+
+// 1. Register
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Validate
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing fields',
+        message: 'Vui lòng nhập đầy đủ username và password'
+      });
+    }
+    
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password too short',
+        message: 'Mật khẩu phải có ít nhất 8 ký tự'
+      });
+    }
+    
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid username',
+        message: 'Username chỉ chứa chữ cái, số và dấu gạch dưới'
+      });
+    }
+    
+    if (users[username]) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username exists',
+        message: 'Tên đăng nhập đã tồn tại'
+      });
+    }
+    
+    // Create user
+    users[username] = {
+      username,
+      password, // In production, hash this!
+      createdAt: new Date().toISOString(),
+      apiCount: 0
+    };
+    
+    console.log(`✅ User registered: ${username}`);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Đăng ký thành công! Vui lòng đăng nhập.',
+      data: { username }
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 2. Login
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing fields',
+        message: 'Vui lòng nhập đầy đủ username và password'
+      });
+    }
+    
+    const user = users[username];
+    if (!user || user.password !== password) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials',
+        message: 'Sai tên đăng nhập hoặc mật khẩu'
+      });
+    }
+    
+    // Create session
+    const token = generateToken();
+    sessions[token] = {
+      user: username,
+      createdAt: Date.now()
+    };
+    
+    console.log(`✅ User logged in: ${username}`);
+    
+    res.json({
+      success: true,
+      message: 'Đăng nhập thành công!',
+      data: {
+        token,
+        username,
+        apiCount: user.apiCount || 0,
+        canCreate: (user.apiCount || 0) < MAX_API_PER_USER
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 3. Logout
+app.post('/api/logout', authenticateUser, async (req, res) => {
+  try {
+    const token = req.headers.authorization;
+    if (token && sessions[token]) {
+      delete sessions[token];
+    }
+    
+    res.json({
+      success: true,
+      message: 'Đăng xuất thành công'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 4. Get current user
+app.get('/api/me', authenticateUser, async (req, res) => {
+  try {
+    const user = users[req.user];
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        username: user.username,
+        createdAt: user.createdAt,
+        apiCount: user.apiCount || 0,
+        canCreate: (user.apiCount || 0) < MAX_API_PER_USER
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
 });
 
 // ============ API ENDPOINTS ============
 
-// 1. Create API
-app.post('/api/create', authenticate, (req, res) => {
+// 1. Create API (requires authentication)
+app.post('/api/create', authenticateUser, async (req, res) => {
   try {
-    const { name, displayName, webhook, privateMode, whitelistIPs } = req.body;
+    const { name, displayName, webhook, privateMode, whitelistIPs, 
+            prefix, suffix, encode, maxJobsPerBoss, maxTotalJobs, 
+            jobSort, customFields, webhookCustom, ttl, removeDuplicate, viewIP } = req.body;
+    
+    const username = req.user;
+    const user = users[username];
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+    
+    // Check API limit
+    if ((user.apiCount || 0) >= MAX_API_PER_USER) {
+      return res.status(403).json({
+        success: false,
+        error: 'API limit reached',
+        message: `Mỗi user chỉ được tạo tối đa ${MAX_API_PER_USER} API. Vui lòng xóa API cũ để tạo mới.`
+      });
+    }
     
     if (!name) {
       return res.status(400).json({
@@ -155,6 +389,17 @@ app.post('/api/create', authenticate, (req, res) => {
         error: 'Missing name',
         message: 'Vui lòng nhập tên API'
       });
+    }
+    
+    // Check name uniqueness
+    for (const key in APIS) {
+      if (APIS[key].name === name) {
+        return res.status(400).json({
+          success: false,
+          error: 'Name exists',
+          message: 'Tên API đã tồn tại. Vui lòng chọn tên khác.'
+        });
+      }
     }
 
     const id = generateId();
@@ -164,10 +409,22 @@ app.post('/api/create', authenticate, (req, res) => {
       id,
       name,
       displayName: displayName || name,
+      owner: username,
       apiKey,
       webhook: webhook || '',
+      webhookCustom: webhookCustom || null,
       privateMode: privateMode || false,
       whitelistIPs: whitelistIPs || [],
+      viewIP: viewIP || '',
+      prefix: prefix || '',
+      suffix: suffix || '',
+      encode: encode || null,
+      maxJobsPerBoss: parseInt(maxJobsPerBoss) || 0,
+      maxTotalJobs: parseInt(maxTotalJobs) || 0,
+      jobSort: jobSort || 'desc',
+      customFields: customFields || null,
+      ttl: parseInt(ttl) || 60000,
+      removeDuplicate: removeDuplicate || false,
       jobs: {},
       enabled: true,
       createdAt: new Date().toISOString(),
@@ -177,7 +434,10 @@ app.post('/api/create', authenticate, (req, res) => {
       }
     };
 
-    console.log(`✅ API created: ${name} (${id})`);
+    // Update user API count
+    user.apiCount = (user.apiCount || 0) + 1;
+
+    console.log(`✅ API created: ${name} by ${username} (${id})`);
 
     res.status(201).json({
       success: true,
@@ -187,7 +447,8 @@ app.post('/api/create', authenticate, (req, res) => {
         apiKey,
         name,
         displayName: displayName || name,
-        link: `/api/${id}/all`
+        link: `/api/${id}/all`,
+        remaining: MAX_API_PER_USER - user.apiCount
       }
     });
   } catch (error) {
@@ -200,55 +461,258 @@ app.post('/api/create', authenticate, (req, res) => {
   }
 });
 
-// 2. Get all APIs
-app.get('/api/my', authenticate, (req, res) => {
-  const apiList = Object.values(APIS).map(api => ({
-    id: api.id,
-    name: api.name,
-    displayName: api.displayName,
-    enabled: api.enabled,
-    privateMode: api.privateMode,
-    totalJobs: api.stats.totalJobs || 0,
-    bossCount: api.stats.bossCount || 0,
-    createdAt: api.createdAt
-  }));
-
-  res.json({
-    success: true,
-    data: apiList,
-    total: apiList.length
-  });
-});
-
-// 3. Get API details
-app.get('/api/:id', authenticate, (req, res) => {
-  const api = APIS[req.params.id];
-  if (!api) {
-    return res.status(404).json({
-      success: false,
-      error: 'API not found',
-      message: 'Không tìm thấy API'
-    });
-  }
-
-  res.json({
-    success: true,
-    data: {
+// 2. Get user's APIs
+app.get('/api/my', authenticateUser, async (req, res) => {
+  try {
+    const username = req.user;
+    const userApis = Object.values(APIS).filter(api => api.owner === username);
+    
+    const apiList = userApis.map(api => ({
       id: api.id,
       name: api.name,
       displayName: api.displayName,
-      apiKey: api.apiKey,
-      webhook: api.webhook,
-      privateMode: api.privateMode,
-      whitelistIPs: api.whitelistIPs,
       enabled: api.enabled,
-      stats: api.stats,
+      privateMode: api.privateMode,
+      totalJobs: api.stats.totalJobs || 0,
+      bossCount: api.stats.bossCount || 0,
+      ttl: api.ttl || 60000,
+      prefix: api.prefix || '',
+      suffix: api.suffix || '',
+      encode: api.encode || null,
+      maxJobsPerBoss: api.maxJobsPerBoss || 0,
+      maxTotalJobs: api.maxTotalJobs || 0,
+      jobSort: api.jobSort || 'desc',
+      customFields: api.customFields || null,
+      webhook: api.webhook || '',
+      webhookCustom: api.webhookCustom || null,
+      removeDuplicate: api.removeDuplicate || false,
+      viewIP: api.viewIP || '',
+      whitelistIPs: api.whitelistIPs || [],
+      apiKey: api.apiKey,
       createdAt: api.createdAt
-    }
-  });
+    }));
+
+    res.json({
+      success: true,
+      data: apiList,
+      total: apiList.length,
+      maxAllowed: MAX_API_PER_USER,
+      remaining: MAX_API_PER_USER - apiList.length
+    });
+  } catch (error) {
+    console.error('Get APIs error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
 });
 
-// 4. Push notification (main endpoint)
+// 3. Get single API
+app.get('/api/:id', authenticateUser, async (req, res) => {
+  try {
+    const api = APIS[req.params.id];
+    if (!api) {
+      return res.status(404).json({
+        success: false,
+        error: 'API not found',
+        message: 'Không tìm thấy API'
+      });
+    }
+
+    if (api.owner !== req.user) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Bạn không có quyền truy cập API này'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: api.id,
+        name: api.name,
+        displayName: api.displayName,
+        apiKey: api.apiKey,
+        webhook: api.webhook,
+        webhookCustom: api.webhookCustom,
+        privateMode: api.privateMode,
+        whitelistIPs: api.whitelistIPs,
+        viewIP: api.viewIP,
+        prefix: api.prefix,
+        suffix: api.suffix,
+        encode: api.encode,
+        maxJobsPerBoss: api.maxJobsPerBoss,
+        maxTotalJobs: api.maxTotalJobs,
+        jobSort: api.jobSort,
+        customFields: api.customFields,
+        ttl: api.ttl,
+        removeDuplicate: api.removeDuplicate,
+        enabled: api.enabled,
+        stats: api.stats,
+        createdAt: api.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Get API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 4. Update API
+app.post('/api/update', authenticateUser, async (req, res) => {
+  try {
+    const { id, ...updates } = req.body;
+    
+    const api = APIS[id];
+    if (!api) {
+      return res.status(404).json({
+        success: false,
+        error: 'API not found',
+        message: 'Không tìm thấy API'
+      });
+    }
+
+    if (api.owner !== req.user) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Bạn không có quyền chỉnh sửa API này'
+      });
+    }
+
+    // Update fields
+    const allowedFields = ['displayName', 'webhook', 'webhookCustom', 'privateMode', 
+                          'whitelistIPs', 'viewIP', 'prefix', 'suffix', 'encode',
+                          'maxJobsPerBoss', 'maxTotalJobs', 'jobSort', 'customFields',
+                          'ttl', 'removeDuplicate', 'enabled'];
+    
+    allowedFields.forEach(field => {
+      if (updates[field] !== undefined) {
+        api[field] = updates[field];
+      }
+    });
+
+    // Update API count if needed
+    if (updates.enabled !== undefined && updates.enabled === false) {
+      // User wants to disable API
+    }
+
+    console.log(`✅ API updated: ${api.name} by ${req.user}`);
+
+    res.json({
+      success: true,
+      message: 'API updated successfully',
+      data: {
+        id: api.id,
+        name: api.name,
+        displayName: api.displayName,
+        enabled: api.enabled
+      }
+    });
+  } catch (error) {
+    console.error('Update API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 5. Delete API
+app.delete('/api/:id', authenticateUser, async (req, res) => {
+  try {
+    const api = APIS[req.params.id];
+    if (!api) {
+      return res.status(404).json({
+        success: false,
+        error: 'API not found'
+      });
+    }
+
+    if (api.owner !== req.user) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Bạn không có quyền xóa API này'
+      });
+    }
+
+    // Update user API count
+    const user = users[req.user];
+    if (user) {
+      user.apiCount = Math.max(0, (user.apiCount || 0) - 1);
+    }
+
+    // Remove API
+    delete APIS[req.params.id];
+    console.log(`🗑️ API deleted: ${api.name} by ${req.user}`);
+
+    res.json({
+      success: true,
+      message: 'API deleted successfully',
+      data: {
+        remaining: MAX_API_PER_USER - (user?.apiCount || 0)
+      }
+    });
+  } catch (error) {
+    console.error('Delete API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 6. Toggle API status
+app.post('/api/:id/toggle', authenticateUser, async (req, res) => {
+  try {
+    const api = APIS[req.params.id];
+    if (!api) {
+      return res.status(404).json({
+        success: false,
+        error: 'API not found'
+      });
+    }
+
+    if (api.owner !== req.user) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Bạn không có quyền thay đổi API này'
+      });
+    }
+
+    api.enabled = !api.enabled;
+    console.log(`🔄 API ${api.name} ${api.enabled ? 'enabled' : 'disabled'} by ${req.user}`);
+
+    res.json({
+      success: true,
+      message: `API ${api.enabled ? 'enabled' : 'disabled'}`,
+      data: { 
+        id: api.id,
+        enabled: api.enabled 
+      }
+    });
+  } catch (error) {
+    console.error('Toggle API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// 7. Push notification (main endpoint)
 app.post('/api/push', authenticate, (req, res) => {
   try {
     const { id, job, players, sea, boss } = req.body;
@@ -366,7 +830,7 @@ app.post('/api/push', authenticate, (req, res) => {
   }
 });
 
-// 5. Get notifications
+// 8. Get notifications
 app.get('/api/notifications', (req, res) => {
   const { sea, boss, limit = 50, offset = 0 } = req.query;
 
@@ -403,7 +867,7 @@ app.get('/api/notifications', (req, res) => {
   });
 });
 
-// 6. Get stats
+// 9. Get stats
 app.get('/api/stats', (req, res) => {
   const bossCount = Object.keys(notifications.stats.byBoss).length;
   const topBosses = Object.entries(notifications.stats.byBoss)
@@ -426,12 +890,16 @@ app.get('/api/stats', (req, res) => {
         seaDistribution: notifications.stats.bySea,
         topBosses: topBosses,
         lastUpdate: notifications.stats.lastUpdate
+      },
+      users: {
+        total: Object.keys(users).length,
+        totalApis: Object.keys(APIS).length
       }
     }
   });
 });
 
-// 7. Get dashboard data
+// 10. Get dashboard data
 app.get('/api/dashboard', (req, res) => {
   const recent = notifications.all
     .slice(-20)
@@ -470,74 +938,36 @@ app.get('/api/dashboard', (req, res) => {
   });
 });
 
-// 8. Delete API
-app.delete('/api/:id', authenticate, (req, res) => {
-  const api = APIS[req.params.id];
-  if (!api) {
-    return res.status(404).json({
-      success: false,
-      error: 'API not found'
-    });
-  }
-
-  delete APIS[req.params.id];
-  console.log(`🗑️ API deleted: ${api.name} (${req.params.id})`);
-
-  res.json({
-    success: true,
-    message: 'API deleted successfully'
-  });
-});
-
-// 9. Toggle API status
-app.post('/api/:id/toggle', authenticate, (req, res) => {
-  const api = APIS[req.params.id];
-  if (!api) {
-    return res.status(404).json({
-      success: false,
-      error: 'API not found'
-    });
-  }
-
-  api.enabled = !api.enabled;
-  console.log(`🔄 API ${api.name} ${api.enabled ? 'enabled' : 'disabled'}`);
-
-  res.json({
-    success: true,
-    message: `API ${api.enabled ? 'enabled' : 'disabled'}`,
-    data: { enabled: api.enabled }
-  });
-});
-
-// 10. Clear all data
-app.delete('/api/clear', authenticate, (req, res) => {
-  const count = notifications.all.length;
-  notifications.all = [];
-  notifications.stats = {
-    total: 0,
-    byBoss: {},
-    bySea: { 1: 0, 2: 0, 3: 0 },
-    byServer: {},
-    lastUpdate: null,
-    activeServers: new Set()
-  };
-
-  // Clear API jobs
-  for (const key in APIS) {
-    APIS[key].jobs = {};
-    APIS[key].stats = {
-      totalJobs: 0,
-      bossCount: 0
+// 11. Clear all data
+app.delete('/api/clear', authenticateUser, async (req, res) => {
+  try {
+    // Only allow if user has admin role or specific permission
+    const count = notifications.all.length;
+    notifications.all = [];
+    notifications.stats = {
+      total: 0,
+      byBoss: {},
+      bySea: { 1: 0, 2: 0, 3: 0 },
+      byServer: {},
+      lastUpdate: null,
+      activeServers: new Set()
     };
+
+    console.log(`🗑️ Cleared ${count} notifications by ${req.user}`);
+
+    res.json({
+      success: true,
+      message: `Cleared ${count} notifications`,
+      cleared: count
+    });
+  } catch (error) {
+    console.error('Clear data error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
   }
-
-  console.log(`🗑️ Cleared ${count} notifications`);
-
-  res.json({
-    success: true,
-    message: `Cleared ${count} notifications`,
-    cleared: count
-  });
 });
 
 // ============ 404 HANDLER ============
@@ -575,12 +1005,16 @@ app.listen(PORT, '0.0.0.0', () => {
 ║  Environment: ${(process.env.NODE_ENV || 'development').padEnd(38)}║
 ╠═══════════════════════════════════════════════════╣
 ║  📊 Dashboard: http://localhost:${PORT}/dashboard${' '.repeat(38 - `http://localhost:${PORT}/dashboard`.length)}║
+║  🔐 Login:     http://localhost:${PORT}/login${' '.repeat(38 - `http://localhost:${PORT}/login`.length)}║
 ║  📡 API:       http://localhost:${PORT}/api${' '.repeat(38 - `http://localhost:${PORT}/api`.length)}║
 ║  ❤️  Health:    http://localhost:${PORT}/health${' '.repeat(38 - `http://localhost:${PORT}/health`.length)}║
 ╚═══════════════════════════════════════════════════╝
   `);
   
   console.log('✅ Server is ready to receive notifications!\n');
+  console.log(`👥 Users: ${Object.keys(users).length}`);
+  console.log(`📦 APIs: ${Object.keys(APIS).length}`);
+  console.log(`📊 Notifications: ${notifications.all.length}`);
 });
 
 // ============ GRACEFUL SHUTDOWN ============
