@@ -3,12 +3,17 @@
 // DOM Elements
 const form = document.getElementById('createApiForm');
 const apiList = document.getElementById('apiList');
-const privateModeCheckbox = document.getElementById('privateMode');
+const privateModeRadios = document.querySelectorAll('input[name="privateMode"]');
+const viewIPGroup = document.getElementById('viewIPGroup');
 const whitelistGroup = document.getElementById('whitelistGroup');
 
-// Toggle whitelist visibility
-privateModeCheckbox.addEventListener('change', function() {
-    whitelistGroup.style.display = this.checked ? 'block' : 'none';
+// Toggle visibility based on private mode
+privateModeRadios.forEach(radio => {
+    radio.addEventListener('change', function() {
+        const isPrivate = this.value === 'true';
+        viewIPGroup.style.display = isPrivate ? 'block' : 'none';
+        whitelistGroup.style.display = isPrivate ? 'block' : 'none';
+    });
 });
 
 // Load user's APIs
@@ -17,6 +22,7 @@ async function loadUserApis() {
         const response = await API.getMyApis();
         if (response.success) {
             renderApiList(response.data || []);
+            document.getElementById('apiCount').textContent = response.data?.length || 0;
         }
     } catch (error) {
         console.error('Failed to load APIs:', error);
@@ -81,14 +87,28 @@ function renderApiList(apis) {
                         <span class="stat-label">Boss</span>
                     </div>
                 </div>
-            </div>
-            <div class="api-card-footer">
                 <div class="api-settings">
                     <span class="setting-tag ${api.privateMode ? 'private' : 'public'}">
                         ${api.privateMode ? '🔒 Private' : '🌍 Public'}
                     </span>
+                    ${api.prefix ? `<span class="setting-tag">📝 Prefix: ${api.prefix}</span>` : ''}
+                    ${api.suffix ? `<span class="setting-tag">📝 Suffix: ${api.suffix}</span>` : ''}
+                    ${api.encode ? `<span class="setting-tag">🔐 Encoded</span>` : ''}
+                    ${api.removeDuplicate ? `<span class="setting-tag">🔄 No Duplicate</span>` : ''}
+                    ${api.customFields ? `<span class="setting-tag">📋 Custom Fields</span>` : ''}
+                </div>
+            </div>
+            <div class="api-card-footer">
+                <div class="api-link">
+                    <span class="label">API Link:</span>
+                    <code>${window.location.origin}/api/${api.id}/all</code>
+                </div>
+                <div class="api-meta">
                     <span class="setting-tag">
                         📅 ${new Date(api.createdAt).toLocaleDateString('vi-VN')}
+                    </span>
+                    <span class="setting-tag">
+                        ⏱️ ${api.ttl || 60000}ms
                     </span>
                 </div>
             </div>
@@ -109,13 +129,47 @@ form.addEventListener('submit', async function(e) {
         const formData = new FormData(this);
         const data = Object.fromEntries(formData.entries());
         
-        data.privateMode = privateModeCheckbox.checked;
+        // Handle private mode
+        const privateMode = document.querySelector('input[name="privateMode"]:checked');
+        data.privateMode = privateMode ? privateMode.value === 'true' : false;
         
+        // Parse whitelist IPs
         if (data.whitelistIPs) {
             data.whitelistIPs = data.whitelistIPs.split('\n').filter(ip => ip.trim());
         } else {
             data.whitelistIPs = [];
         }
+        
+        // Parse encode JSON
+        if (data.encode) {
+            try {
+                data.encode = JSON.parse(data.encode);
+            } catch (e) {
+                data.encode = null;
+            }
+        }
+        
+        // Parse customFields
+        if (data.customFields) {
+            data.customFields = data.customFields.split(',').map(f => f.trim()).filter(f => f);
+        } else {
+            data.customFields = null;
+        }
+        
+        // Parse webhookCustom
+        if (data.webhookCustom) {
+            try {
+                data.webhookCustom = JSON.parse(data.webhookCustom);
+            } catch (e) {
+                data.webhookCustom = null;
+            }
+        }
+        
+        // Convert numbers
+        data.ttl = parseInt(data.ttl) || 60000;
+        data.maxJobsPerBoss = parseInt(data.maxJobsPerBoss) || 0;
+        data.maxTotalJobs = parseInt(data.maxTotalJobs) || 0;
+        data.removeDuplicate = document.getElementById('removeDuplicate').checked;
 
         const response = await API.createApi(data);
 
@@ -128,6 +182,7 @@ form.addEventListener('submit', async function(e) {
             document.getElementById('apiKeyModal').style.display = 'flex';
             
             form.reset();
+            viewIPGroup.style.display = 'none';
             whitelistGroup.style.display = 'none';
             
             await loadUserApis();
@@ -226,20 +281,4 @@ async function toggleApi(id) {
 }
 
 // Close modal on click outside
-document.getElementById('apiKeyModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        closeModal();
-    }
-});
-
-// Close modal on ESC key
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        closeModal();
-    }
-});
-
-// Load data on page load
-document.addEventListener('DOMContentLoaded', function() {
-    loadUserApis();
-});
+document
