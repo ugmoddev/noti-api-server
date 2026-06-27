@@ -32,58 +32,98 @@
 
             <div class="create-form-container">
                 <form id="createApiForm" class="create-form">
+                    <!-- Step 1: Thông tin cơ bản -->
                     <div class="form-section">
-                        <h2><i class="fas fa-info-circle"></i> Thông tin cơ bản</h2>
+                        <div class="section-header">
+                            <span class="step-badge">1</span>
+                            <h2><i class="fas fa-info-circle"></i> Thông tin cơ bản</h2>
+                        </div>
                         
                         <div class="form-group">
                             <label for="apiName">
                                 <i class="fas fa-tag"></i> Tên API <span class="required">*</span>
                             </label>
-                            <input type="text" id="apiName" name="name" 
-                                   placeholder="Ví dụ: my_noti_api" required>
-                            <small>Chỉ chứa chữ cái, số và dấu gạch dưới</small>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-code"></i></span>
+                                <input type="text" id="apiName" name="name" 
+                                       placeholder="Ví dụ: my_noti_api" 
+                                       class="input-field" required>
+                                <span class="input-validation"></span>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Chỉ chứa chữ cái, số và dấu gạch dưới</small>
                         </div>
 
                         <div class="form-group">
                             <label for="displayName">
                                 <i class="fas fa-eye"></i> Tên hiển thị
                             </label>
-                            <input type="text" id="displayName" name="displayName" 
-                                   placeholder="Ví dụ: API Thông báo của tôi">
-                            <small>Tên hiển thị trên dashboard</small>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-pen"></i></span>
+                                <input type="text" id="displayName" name="displayName" 
+                                       placeholder="Ví dụ: API Thông báo của tôi" 
+                                       class="input-field">
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Tên hiển thị trên dashboard</small>
                         </div>
+                    </div>
 
+                    <!-- Step 2: Webhook -->
+                    <div class="form-section">
+                        <div class="section-header">
+                            <span class="step-badge">2</span>
+                            <h2><i class="fas fa-link"></i> Webhook</h2>
+                        </div>
+                        
                         <div class="form-group">
                             <label for="webhook">
                                 <i class="fas fa-bell"></i> Webhook URL
                             </label>
-                            <input type="url" id="webhook" name="webhook" 
-                                   placeholder="https://discord.com/api/webhooks/...">
-                            <small>URL webhook để nhận thông báo khi có job mới</small>
+                            <div class="input-wrapper">
+                                <span class="input-icon"><i class="fas fa-globe"></i></span>
+                                <input type="url" id="webhook" name="webhook" 
+                                       placeholder="https://discord.com/api/webhooks/..." 
+                                       class="input-field">
+                                <span class="input-suffix"><i class="fas fa-check-circle"></i></span>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> URL webhook để nhận thông báo khi có job mới</small>
                         </div>
                     </div>
 
+                    <!-- Step 3: Bảo mật -->
                     <div class="form-section">
-                        <h2><i class="fas fa-shield-alt"></i> Bảo mật</h2>
+                        <div class="section-header">
+                            <span class="step-badge">3</span>
+                            <h2><i class="fas fa-shield-alt"></i> Bảo mật</h2>
+                        </div>
                         
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="privateMode" name="privateMode">
-                                <i class="fas fa-lock"></i> Chế độ riêng tư
+                        <div class="form-group toggle-group">
+                            <label class="toggle-label">
+                                <span class="toggle-text">
+                                    <i class="fas fa-lock"></i> Chế độ riêng tư
+                                </span>
+                                <div class="toggle-switch">
+                                    <input type="checkbox" id="privateMode" name="privateMode" class="toggle-input">
+                                    <span class="toggle-slider"></span>
+                                </div>
                             </label>
-                            <small>Chỉ cho phép IP được whitelist truy cập</small>
+                            <small><i class="fas fa-info-circle"></i> Chỉ cho phép IP được whitelist truy cập</small>
                         </div>
 
                         <div class="form-group" id="whitelistGroup" style="display:none;">
                             <label for="whitelistIPs">
-                                <i class="fas fa-list"></i> Whitelist IPs
+                                <i class="fas fa-list"></i> Danh sách IP được phép
                             </label>
-                            <textarea id="whitelistIPs" name="whitelistIPs" rows="3" 
-                                      placeholder="192.168.1.1&#10;10.0.0.1"></textarea>
-                            <small>Mỗi IP một dòng</small>
+                            <div class="input-wrapper textarea-wrapper">
+                                <span class="input-icon"><i class="fas fa-network-wired"></i></span>
+                                <textarea id="whitelistIPs" name="whitelistIPs" rows="3" 
+                                          placeholder="192.168.1.1&#10;10.0.0.1&#10;172.16.0.1"
+                                          class="input-field textarea-field"></textarea>
+                            </div>
+                            <small><i class="fas fa-info-circle"></i> Mỗi IP một dòng</small>
                         </div>
                     </div>
 
+                    <!-- Form Actions -->
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary btn-large">
                             <i class="fas fa-plus"></i> Tạo API
@@ -95,15 +135,23 @@
                 </form>
             </div>
 
+            <!-- API List -->
             <div class="api-list-container">
-                <h2><i class="fas fa-list"></i> API của bạn</h2>
+                <div class="api-list-header">
+                    <h2><i class="fas fa-list"></i> API của bạn</h2>
+                    <span class="api-count" id="apiCount">0</span>
+                </div>
                 <div id="apiList" class="api-list">
-                    <p class="loading-text">Đang tải danh sách API...</p>
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>Đang tải danh sách API...</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Modal -->
     <div id="apiKeyModal" class="modal" style="display:none;">
         <div class="modal-content">
             <div class="modal-header">
@@ -111,21 +159,32 @@
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <p>API của bạn đã được tạo thành công!</p>
+                <div class="success-icon">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <p class="success-text">API của bạn đã được tạo thành công!</p>
+                
                 <div class="api-key-display">
-                    <strong>API ID:</strong> <span id="newApiId"></span><br>
-                    <strong>API Key:</strong> 
-                    <div class="key-container">
-                        <code id="newApiKey"></code>
-                        <button onclick="copyApiKey()" class="btn btn-small">
-                            <i class="fas fa-copy"></i> Copy
-                        </button>
+                    <div class="key-item">
+                        <span class="key-label"><i class="fas fa-id-card"></i> API ID:</span>
+                        <code id="newApiId" class="key-value"></code>
+                    </div>
+                    <div class="key-item">
+                        <span class="key-label"><i class="fas fa-key"></i> API Key:</span>
+                        <div class="key-copy-wrapper">
+                            <code id="newApiKey" class="key-value key-highlight"></code>
+                            <button onclick="copyApiKey()" class="btn-copy">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
+
                 <div class="api-link-display">
-                    <strong>API Link:</strong>
-                    <code id="newApiLink"></code>
+                    <span class="link-label"><i class="fas fa-link"></i> API Link:</span>
+                    <code id="newApiLink" class="link-value"></code>
                 </div>
+
                 <div class="modal-actions">
                     <button onclick="closeModal()" class="btn btn-primary">
                         <i class="fas fa-check"></i> OK
