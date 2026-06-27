@@ -2,8 +2,15 @@
 const API = {
     baseURL: window.location.origin,
     
+    // Get auth token
+    getToken() {
+        return localStorage.getItem('token');
+    },
+    
     async request(endpoint, options = {}) {
         const url = `${this.baseURL}${endpoint}`;
+        const token = this.getToken();
+        
         const config = {
             headers: {
                 'Content-Type': 'application/json',
@@ -12,11 +19,23 @@ const API = {
             ...options
         };
         
+        // Add auth token if available
+        if (token) {
+            config.headers['Authorization'] = token;
+        }
+        
         try {
             const response = await fetch(url, config);
             const data = await response.json();
             
             if (!response.ok) {
+                // Handle unauthorized
+                if (response.status === 401) {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('username');
+                    window.location.href = '/login.html';
+                    throw new Error('Session expired. Please login again.');
+                }
                 throw new Error(data.error || data.message || 'API request failed');
             }
             
@@ -25,6 +44,31 @@ const API = {
             console.error('API Error:', error);
             throw error;
         }
+    },
+    
+    // Auth endpoints
+    async login(username, password) {
+        return this.request('/api/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+    },
+    
+    async register(username, password) {
+        return this.request('/api/register', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+    },
+    
+    async logout() {
+        return this.request('/api/logout', {
+            method: 'POST'
+        });
+    },
+    
+    async getMe() {
+        return this.request('/api/me');
     },
     
     // Get stats
@@ -49,16 +93,22 @@ const API = {
         return this.request('/api/my');
     },
     
+    // Get single API
+    async getApi(id) {
+        return this.request(`/api/${id}`);
+    },
+    
     // Create API
     async createApi(data) {
-        // Remove empty values
-        Object.keys(data).forEach(key => {
-            if (data[key] === '' || data[key] === null || data[key] === undefined) {
-                delete data[key];
-            }
-        });
-        
         return this.request('/api/create', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    
+    // Update API
+    async updateApi(data) {
+        return this.request('/api/update', {
             method: 'POST',
             body: JSON.stringify(data)
         });
