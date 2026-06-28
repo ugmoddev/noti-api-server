@@ -1,1 +1,57 @@
+# Node modules
+node_modules/
 
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.json
+!package-lock.json
+!package.json
+db*.json
+db_backup*.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+/tmp/
+tmp/
+*.tmp
+
+# Uploads
+uploads/
+bot_uploads/
+
+# Build files
+dist/
+build/
+*.min.js
+*.min.css
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
