@@ -1,1030 +1,1869 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-require('dotenv').config();
+// ============================================
+// IMPORTS
+// ============================================
+const express = require("express")
+const crypto = require("crypto")
+const compression = require("compression")
+const cors = require("cors")
+const http = require("http")
+const https = require("https")
+const WebSocket = require("ws")
+const { spawn, execSync } = require("child_process")
+const fs = require("fs")
+const multer = require("multer")
+const path = require("path")
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+// ============================================
+// CONFIGURATION
+// ============================================
+const config = {
+    port: process.env.PORT || 3000,
+    ownerToken: process.env.OWNER_TOKEN,
+    githubToken: process.env.GITHUB_TOKEN,
+    githubRepo: process.env.GITHUB_REPO,
+    githubBranch: process.env.GITHUB_BRANCH || "main",
+    encryptionKey: process.env.ENCRYPTION_KEY || "",
+    maxChatMessages: 300,
+    maxBotLogs: 500,
+    maxMonitorHistory: 60,
+    botLimitUser: 1,
+    botMaxRestarts: 5,
+    botRestartDelay: 15000,
+    dbPath: "db.json",
+    dbBackupPath: "db.backup.json",
+    botDbPath: "db_bots.json",
+    botDbBackupPath: "db_bots.backup.json"
+}
 
-// ============ MIDDLEWARE ============
+// Validate required config
+if (!config.ownerToken) throw new Error("Missing OWNER_TOKEN")
+if (!config.githubToken || !config.githubRepo) throw new Error("Missing GITHUB config")
 
-// Security
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
-}));
+// ============================================
+// DATABASE CLASS
+// ============================================
+class Database {
+    constructor() {
+        this.data = { apis: {}, users: {}, sessions: {}, bots: {}, monitors: {} }
+        this.fileSha = {}
+        this.writeQueue = Promise.resolve()
+        this.pendingWrite = false
+        this.saveTimeout = null
+        this.localDbPath = "/tmp/db_local.json"
+    }
 
-// CORS
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
-}));
+    // Encryption
+    encrypt(text) {
+        if (!config.encryptionKey) return text
+        const key = crypto.createHash("sha256").update(config.encryptionKey).digest()
+        const iv = crypto.randomBytes(16)
+        const cipher = crypto.createCipheriv("aes-256-cbc", key, iv)
+        let enc = cipher.update(text, "utf8", "base64")
+        enc += cipher.final("base64")
+        return iv.toString("base64") + ":" + enc
+    }
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  message: {
-    success: false,
-    error: 'Too many requests',
-    message: 'Vui lòng thử lại sau 15 phút'
-  }
-});
-app.use('/api', limiter);
+    decrypt(text) {
+        if (!config.encryptionKey) return text
+        const parts = text.split(":")
+        if (parts.length !== 2) return text
+        try {
+            const key = crypto.createHash("sha256").update(config.encryptionKey).digest()
+            const iv = Buffer.from(parts[0], "base64")
+            const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv)
+            let dec = decipher.update(parts[1], "base64", "utf8")
+            dec += decipher.final("utf8")
+            return dec
+        } catch (e) {
+            return null
+        }
+    }
 
-// Logging
-app.use(morgan('combined'));
+    // GitHub operations
+    async fetchFile(filePath) {
+        const url = `https://api.github.com/repos/${config.githubRepo}/contents/${filePath}?ref=${config.githubBranch}`
+        const res = await fetch(url, {
+            headers: {
+                Authorization: `token ${config.githubToken}`,
+                Accept: "application/vnd.github.v3+json"
+            }
+        })
+        if (!res.ok) return null
+        const data = await res.json()
+        this.fileSha[filePath] = data.sha
+        return this.decrypt(Buffer.from(data.content, "base64").toString("utf8"))
+    }
 
-// Compression
-app.use(compression());
+    async getFileSha(filePath) {
+        try {
+            const url = `https://api.github.com/repos/${config.githubRepo}/contents/${filePath}?ref=${config.githubBranch}`
+            const res = await fetch(url, {
+                headers: {
+                    Authorization: `token ${config.githubToken}`,
+                    Accept: "application/vnd.github.v3+json"
+                }
+            })
+            if (!res.ok) return null
+            const data = await res.json()
+            this.fileSha[filePath] = data.sha
+            return data.sha
+        } catch { return null }
+    }
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    async initEmptyRepo() {
+        const baseUrl = `https://api.github.com/repos/${config.githubRepo}`
+        const headers = {
+            Authorization: `token ${config.githubToken}`,
+            Accept: "application/vnd.github.v3+json",
+            "Content-Type": "application/json"
+        }
+        
+        const treeRes = await fetch(`${baseUrl}/git/trees`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ tree: [] })
+        })
+        if (!treeRes.ok) throw new Error("Init tree failed")
+        const treeData = await treeRes.json()
+        
+        const commitRes = await fetch(`${baseUrl}/git/commits`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+                message: "init",
+                tree: treeData.sha,
+                parents: []
+            })
+        })
+        if (!commitRes.ok) throw new Error("Init commit failed")
+        const commitData = await commitRes.json()
+        
+        const refRes = await fetch(`${baseUrl}/git/refs`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+                ref: `refs/heads/${config.githubBranch}`,
+                sha: commitData.sha
+            })
+        })
+        if (!refRes.ok) throw new Error("Init branch failed")
+    }
 
-// Static files
-app.use(express.static(path.join(__dirname, 'public')));
+    async pushFile(filePath, content, retry = true) {
+        // Check if branch exists
+        const branchCheckUrl = `https://api.github.com/repos/${config.githubRepo}/git/refs/heads/${config.githubBranch}`
+        let branchCheck = await fetch(branchCheckUrl, {
+            headers: {
+                Authorization: `token ${config.githubToken}`,
+                Accept: "application/vnd.github.v3+json"
+            }
+        })
+        if (!branchCheck.ok && branchCheck.status === 404) {
+            await this.initEmptyRepo()
+            await new Promise(r => setTimeout(r, 1000))
+        }
 
-// ============ DATA STORAGE ============
+        const encrypted = this.encrypt(content)
+        const encoded = Buffer.from(encrypted).toString("base64")
+        const url = `https://api.github.com/repos/${config.githubRepo}/contents/${filePath}`
+        const headers = {
+            Authorization: `token ${config.githubToken}`,
+            Accept: "application/vnd.github.v3+json",
+            "Content-Type": "application/json"
+        }
 
-const notifications = {
-  all: [],
-  stats: {
-    total: 0,
-    byBoss: {},
-    bySea: { 1: 0, 2: 0, 3: 0 },
-    byServer: {},
-    lastUpdate: null,
-    activeServers: new Set()
-  }
-};
+        let freshSha = await this.getFileSha(filePath)
+        const body = {
+            message: `update ${filePath}`,
+            content: encoded,
+            branch: config.githubBranch
+        }
+        if (freshSha) body.sha = freshSha
 
-// ============ USER MANAGEMENT ============
+        let res = await fetch(url, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify(body)
+        })
 
-const users = {};
-const sessions = {};
-const APIS = {};
+        if (res.status === 409 && retry) {
+            freshSha = await this.getFileSha(filePath)
+            if (freshSha) body.sha = freshSha
+            else delete body.sha
+            res = await fetch(url, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify(body)
+            })
+        }
 
-// ============ CONFIGURATION ============
+        if (!res.ok) {
+            const errText = await res.text().catch(() => res.statusText)
+            throw new Error(`Push failed: ${res.status} ${errText}`)
+        }
 
-const VALID_API_KEYS = {
-  '87ebc4e597aab91a0aae0900ee6c6753bdb6527cf02d8aa18bf617bf57a57005': 'main'
-};
+        const data = await res.json()
+        this.fileSha[filePath] = data.content.sha
+    }
 
-const MAX_API_PER_USER = 1;
+    // Local DB operations
+    saveLocal(data) {
+        try {
+            fs.writeFileSync(this.localDbPath, data, "utf8")
+        } catch (e) {}
+    }
 
-// ============ HELPER FUNCTIONS ============
+    loadLocal() {
+        try {
+            if (fs.existsSync(this.localDbPath)) {
+                const raw = fs.readFileSync(this.localDbPath, "utf8")
+                if (raw) {
+                    const data = JSON.parse(raw)
+                    if (this.validate(data)) {
+                        this.data = data
+                        return true
+                    }
+                }
+            }
+        } catch (e) {}
+        return false
+    }
 
-const generateId = () => {
-  return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-};
+    validate(data) {
+        return data && typeof data === "object" &&
+            data.apis && data.users
+    }
 
-const generateApiKey = () => {
-  return 'api_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-};
+    merge(data) {
+        if (!this.validate(data)) return false
+        this.data.apis = data.apis || {}
+        this.data.users = data.users || {}
+        this.data.sessions = data.sessions || {}
+        this.data.monitors = data.monitors || {}
+        if (data.bots) this.data.bots = data.bots
+        else this.data.bots = this.data.bots || {}
+        return true
+    }
 
-const generateToken = () => {
-  return 'token_' + Math.random().toString(36).substring(2, 20) + Date.now().toString(36);
-};
+    // Main load
+    async load() {
+        try {
+            // Try main DB
+            let raw = await this.fetchFile(config.dbPath)
+            if (raw) {
+                const mainData = JSON.parse(raw)
+                this.merge(mainData)
+                
+                // Load bots separately
+                const rawBots = await this.fetchFile(config.botDbPath)
+                if (rawBots) {
+                    const botsData = JSON.parse(rawBots)
+                    this.data.bots = botsData.bots || {}
+                } else {
+                    const rawBotsBackup = await this.fetchFile(config.botDbBackupPath)
+                    if (rawBotsBackup) {
+                        const botsData = JSON.parse(rawBotsBackup)
+                        this.data.bots = botsData.bots || {}
+                    }
+                }
+                return true
+            }
 
-const validateApiKey = (key) => {
-  return VALID_API_KEYS[key] !== undefined;
-};
+            // Try backup
+            raw = await this.fetchFile(config.dbBackupPath)
+            if (raw) {
+                const mainData = JSON.parse(raw)
+                this.merge(mainData)
+                return true
+            }
+        } catch (e) {}
 
-const getApiKey = (req) => {
-  return req.body.apiKey || req.query.apiKey || req.headers['x-api-key'];
-};
+        // Try local
+        if (this.loadLocal()) return true
+        return false
+    }
 
-const getSession = (req) => {
-  const token = req.headers.authorization;
-  if (!token) return null;
-  return sessions[token] || null;
-};
+    // Write DB
+    async write() {
+        const mainData = JSON.stringify({
+            apis: this.data.apis,
+            users: this.data.users,
+            sessions: this.data.sessions,
+            monitors: this.data.monitors
+        })
+        const botsData = JSON.stringify({ bots: this.data.bots })
+        
+        this.saveLocal(JSON.stringify(this.data))
+        
+        try {
+            await this.pushFile(config.dbBackupPath, mainData)
+            await this.pushFile(config.dbPath, mainData)
+            await this.pushFile(config.botDbBackupPath, botsData)
+            await this.pushFile(config.botDbPath, botsData)
+        } catch (e) {
+            console.error("GitHub push failed:", e.message)
+        }
+    }
 
-const getUser = (req) => {
-  const session = getSession(req);
-  return session ? session.user : null;
-};
+    // Save with debounce
+    save() {
+        return new Promise((resolve) => {
+            if (this.saveTimeout) clearTimeout(this.saveTimeout)
+            this.saveTimeout = setTimeout(() => {
+                if (this.pendingWrite) { resolve(); return }
+                this.pendingWrite = true
+                this.writeQueue = this.writeQueue
+                    .then(() => this.write())
+                    .finally(() => {
+                        this.pendingWrite = false
+                        resolve()
+                    })
+            }, 300)
+        })
+    }
 
-const isAuthenticated = (req) => {
-  return getUser(req) !== null;
-};
+    // Getters
+    get apis() { return this.data.apis }
+    get users() { return this.data.users }
+    get sessions() { return this.data.sessions }
+    get bots() { return this.data.bots }
+    get monitors() { return this.data.monitors }
 
-// ============ AUTHENTICATION MIDDLEWARE ============
+    set bots(value) { this.data.bots = value }
+}
 
-const authenticate = (req, res, next) => {
-  const apiKey = getApiKey(req);
-  
-  if (!apiKey) {
-    return res.status(401).json({
-      success: false,
-      error: 'API key required',
-      message: 'Vui lòng cung cấp API key'
-    });
-  }
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+const utils = {
+    genToken: () => crypto.randomBytes(32).toString("hex"),
+    genID: () => crypto.randomBytes(6).toString("hex"),
+    now: () => Date.now(),
+    toBool: v => typeof v === "boolean" ? v :
+        (typeof v === "string" ? v.toLowerCase() === "true" || v === "1" : !!v),
+    getIP: r => (r.headers["x-forwarded-for"] || "").split(",")[0].trim() || r.socket.remoteAddress,
+    genGuest: ip => "Khach" + (ip.replace(/\D/g, "").slice(-5) || Math.floor(Math.random() * 99999)),
+    parseEncode: txt => { try { return JSON.parse(txt) } catch { return null } },
+    encode: (txt, map) => {
+        if (!map) return String(txt)
+        return String(txt).split("").map(c => map[c] || c).join("")
+    }
+}
 
-  if (!validateApiKey(apiKey)) {
-    return res.status(403).json({
-      success: false,
-      error: 'Invalid API key',
-      message: 'API key không hợp lệ'
-    });
-  }
+// ============================================
+// JOB MANAGER CLASS
+// ============================================
+class JobManager {
+    constructor(db) {
+        this.db = db
+        this.globalDefaults = {
+            ttl: 60000,
+            prefix: "",
+            suffix: "",
+            encode: null,
+            removeDuplicate: false,
+            maxJobsPerBoss: 0,
+            maxTotalJobs: 0,
+            enabled: true,
+            privateMode: false,
+            whitelistIPs: [],
+            jobSort: "desc",
+            customFields: null,
+            webhookCustom: null
+        }
+    }
 
-  next();
-};
+    cleanExpiredJobs(api) {
+        const t = utils.now()
+        Object.keys(api.jobs).forEach(boss => {
+            api.jobs[boss] = api.jobs[boss].filter(j => t - j.t < api.ttl)
+            if (!api.jobs[boss].length) delete api.jobs[boss]
+        })
+    }
 
-const authenticateUser = (req, res, next) => {
-  const session = getSession(req);
-  
-  if (!session) {
-    return res.status(401).json({
-      success: false,
-      error: 'Unauthorized',
-      message: 'Vui lòng đăng nhập'
-    });
-  }
+    applyLimits(api) {
+        if (api.maxTotalJobs > 0) {
+            let total = 0
+            for (let b in api.jobs) total += api.jobs[b].length
+            while (total > api.maxTotalJobs) {
+                let oldestBoss = null, oldestTime = Infinity
+                for (let b in api.jobs) {
+                    if (api.jobs[b].length && api.jobs[b][0].t < oldestTime) {
+                        oldestTime = api.jobs[b][0].t
+                        oldestBoss = b
+                    }
+                }
+                if (oldestBoss) {
+                    api.jobs[oldestBoss].shift()
+                    total--
+                    if (!api.jobs[oldestBoss].length) delete api.jobs[oldestBoss]
+                } else break
+            }
+        }
+        if (api.maxJobsPerBoss > 0) {
+            for (let b in api.jobs) {
+                while (api.jobs[b].length > api.maxJobsPerBoss) {
+                    api.jobs[b].shift()
+                }
+            }
+        }
+    }
 
-  req.user = session.user;
-  next();
-};
+    injectWebhookData(template, data) {
+        if (!template) return null
+        try {
+            let str = typeof template === "string" ? template : JSON.stringify(template)
+            str = str.replace(/\{\{job\}\}/g, String(data.job || ""))
+                .replace(/\{\{boss\}\}/g, String(data.boss || ""))
+                .replace(/\{\{players\}\}/g, String(data.players || 0))
+                .replace(/\{\{sea\}\}/g, String(data.sea || 0))
+                .replace(/\{\{time\}\}/g, new Date().toISOString())
+            return JSON.parse(str)
+        } catch { return null }
+    }
 
-// ============ ROUTES ============
+    async sendWebhook(url, data, custom) {
+        try {
+            const payload = custom
+                ? (this.injectWebhookData(custom, data) || {
+                    content: `Job: ${data.job} | Boss: ${data.boss} | Players: ${data.players} | Sea: ${data.sea}`
+                })
+                : {
+                    embeds: [{
+                        title: "New Job Added",
+                        color: 65280,
+                        fields: [
+                            { name: "Boss", value: String(data.boss), inline: true },
+                            { name: "Players", value: String(data.players), inline: true },
+                            { name: "Sea", value: String(data.sea), inline: true },
+                            { name: "JobId", value: String(data.job).slice(0, 1000) }
+                        ],
+                        timestamp: new Date().toISOString()
+                    }]
+                }
+            await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(8000)
+            })
+        } catch {}
+    }
 
-// Home
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/index.html'));
-});
+    filterJobFields(job, fields) {
+        if (!fields || !fields.length) return job
+        const f = {}
+        fields.forEach(k => {
+            if (Object.prototype.hasOwnProperty.call(job, k)) f[k] = job[k]
+        })
+        return f
+    }
+}
 
-// Dashboard
-app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/dashboard.html'));
-});
+// ============================================
+// BOT MANAGER CLASS
+// ============================================
+class BotManager {
+    constructor(db) {
+        this.db = db
+        this.activeProcesses = new Map()
+        this.tmpDir = "/tmp/bot_uploads"
+        if (!fs.existsSync(this.tmpDir)) {
+            fs.mkdirSync(this.tmpDir, { recursive: true })
+        }
+    }
 
-// Create API page
-app.get('/create-api', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/create-api.html'));
-});
+    spawn(bot) {
+        if (this.activeProcesses.has(bot.id)) return
+        
+        const code = Buffer.from(bot.code, "base64").toString("utf8")
+        const tmpFile = `/tmp/bot_${bot.id}.py`
+        fs.writeFileSync(tmpFile, code)
+        
+        const child = spawn("python3", [tmpFile], {
+            env: { ...process.env, ...bot.env }
+        })
+        
+        bot.pid = child.pid
+        bot.status = "running"
+        bot.updated_at = utils.now()
+        this.activeProcesses.set(bot.id, child)
+        
+        const appendLog = (data) => {
+            const lines = String(data).split("\n").filter(Boolean)
+            bot.logs.push(...lines)
+            if (bot.logs.length > config.maxBotLogs) {
+                bot.logs.splice(0, bot.logs.length - config.maxBotLogs)
+            }
+            this.db.save()
+        }
+        
+        child.stdout.on("data", appendLog)
+        child.stderr.on("data", data => appendLog("[ERR] " + data))
+        
+        child.on("close", (exitCode, signal) => {
+            this.activeProcesses.delete(bot.id)
+            bot.pid = null
+            bot.updated_at = utils.now()
+            bot.logs.push(`[EXIT] code=${exitCode} signal=${signal}`)
+            
+            const currentBot = this.db.bots[bot.id]
+            if (!currentBot) {
+                try { fs.unlinkSync(tmpFile) } catch {}
+                return
+            }
+            
+            if (currentBot.autoRestart &&
+                (currentBot.restartCount || 0) < config.botMaxRestarts) {
+                currentBot.status = "restarting"
+                currentBot.restartCount = (currentBot.restartCount || 0) + 1
+                currentBot.logs.push(
+                    `[AUTO-RESTART] lan ${currentBot.restartCount}/${config.botMaxRestarts} sau ${config.botRestartDelay / 1000}s...`
+                )
+                this.db.save()
+                
+                setTimeout(() => {
+                    const b = this.db.bots[bot.id]
+                    if (b && b.autoRestart && b.status === "restarting") {
+                        b.logs.push(`[RESTART] bat lai...`)
+                        this.spawn(b)
+                        this.db.save()
+                    }
+                }, config.botRestartDelay)
+            } else {
+                currentBot.status = "stopped"
+                if (currentBot.autoRestart &&
+                    (currentBot.restartCount || 0) >= config.botMaxRestarts) {
+                    currentBot.logs.push(`[STOP] Da restart ${config.botMaxRestarts} lan, dung lai.`)
+                    currentBot.autoRestart = false
+                }
+                this.db.save()
+            }
+            
+            try { fs.unlinkSync(tmpFile) } catch {}
+        })
+        
+        child.on("error", err => {
+            bot.status = "error"
+            bot.logs.push("[ERROR] " + err.message)
+            this.activeProcesses.delete(bot.id)
+            this.db.save()
+        })
+    }
 
-// Login page
-app.get('/login', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/login.html'));
-});
+    stop(botId) {
+        const bot = this.db.bots[botId]
+        if (!bot) return false
+        
+        bot.autoRestart = false
+        
+        if (bot.status !== "running" && bot.status !== "restarting" || !bot.pid) {
+            bot.status = "stopped"
+            this.db.save()
+            return true
+        }
+        
+        try {
+            const child = this.activeProcesses.get(bot.id)
+            if (child) {
+                child.kill("SIGTERM")
+                this.activeProcesses.delete(bot.id)
+            } else {
+                process.kill(bot.pid, "SIGTERM")
+            }
+            bot.status = "stopped"
+            bot.pid = null
+            bot.updated_at = utils.now()
+            this.db.save()
+            return true
+        } catch (e) {
+            bot.status = "error"
+            this.db.save()
+            return false
+        }
+    }
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    totalNotifications: notifications.all.length,
-    activeServers: notifications.stats.activeServers.size,
-    totalUsers: Object.keys(users).length,
-    totalApis: Object.keys(APIS).length
-  });
-});
+    delete(botId) {
+        const bot = this.db.bots[botId]
+        if (!bot) return false
+        
+        bot.autoRestart = false
+        
+        if ((bot.status === "running" || bot.status === "restarting") && bot.pid) {
+            try {
+                const child = this.activeProcesses.get(bot.id)
+                if (child) {
+                    child.kill("SIGKILL")
+                    this.activeProcesses.delete(bot.id)
+                } else {
+                    process.kill(bot.pid, "SIGKILL")
+                }
+            } catch {}
+        }
+        
+        delete this.db.bots[botId]
+        this.db.save()
+        return true
+    }
+}
 
-// ============ AUTH ENDPOINTS ============
+// ============================================
+// MONITOR MANAGER CLASS
+// ============================================
+class MonitorManager {
+    constructor(db) {
+        this.db = db
+    }
 
-// 1. Register
-app.post('/api/register', async (req, res) => {
-  try {
-    const { username, password } = req.body;
+    async check(monitor) {
+        const old = monitor.lastStatus
+        const start = utils.now()
+        
+        try {
+            await new Promise((resolve, reject) => {
+                const lib = monitor.url.startsWith("https") ? https : http
+                const req = lib.request(monitor.url, {
+                    method: "GET",
+                    timeout: 15000
+                }, res => {
+                    monitor.lastCode = res.statusCode
+                    res.resume()
+                    resolve()
+                })
+                req.on("error", reject)
+                req.on("timeout", () => {
+                    req.destroy()
+                    reject(new Error("timeout"))
+                })
+                req.end()
+            })
+            
+            monitor.totalChecks = (monitor.totalChecks || 0) + 1
+            monitor.goodChecks = (monitor.goodChecks || 0) + 1
+            monitor.uptime = ((monitor.goodChecks / monitor.totalChecks) * 100).toFixed(2)
+            monitor.lastPing = utils.now() - start
+            monitor.lastStatus = "online"
+            monitor.lastError = null
+            monitor.lastCheck = utils.now()
+            monitor.retry = 0
+            
+            monitor.history = monitor.history || []
+            monitor.history.push({ t: utils.now(), s: "on", p: monitor.lastPing })
+            if (monitor.history.length > config.maxMonitorHistory) {
+                monitor.history.shift()
+            }
+            
+            if (old !== "online" && monitor.webhook) {
+                await this.sendWebhook(monitor, "up")
+            }
+        } catch (err) {
+            monitor.retry = (monitor.retry || 0) + 1
+            if (monitor.retry < 3) return
+            
+            monitor.totalChecks = (monitor.totalChecks || 0) + 1
+            monitor.uptime = (((monitor.goodChecks || 0) / monitor.totalChecks) * 100).toFixed(2)
+            monitor.lastStatus = "offline"
+            monitor.lastError = err.message || String(err)
+            monitor.lastCheck = utils.now()
+            
+            monitor.history = monitor.history || []
+            monitor.history.push({ t: utils.now(), s: "off", p: 0 })
+            if (monitor.history.length > config.maxMonitorHistory) {
+                monitor.history.shift()
+            }
+            
+            if (old !== "offline" && monitor.webhook) {
+                await this.sendWebhook(monitor, "down")
+            }
+        }
+        
+        this.db.save()
+    }
+
+    async sendWebhook(monitor, type) {
+        try {
+            await fetch(monitor.webhook, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    embeds: [{
+                        title: type === "up" ? "🟢 Online" : "🔴 Offline",
+                        color: type === "up" ? 65280 : 16711680,
+                        fields: [
+                            { name: "Name", value: monitor.name, inline: true },
+                            { name: "URL", value: monitor.url, inline: true },
+                            { name: "Uptime", value: monitor.uptime + "%", inline: true },
+                            { name: "Ping", value: (monitor.lastPing || 0) + "ms", inline: true }
+                        ],
+                        timestamp: new Date().toISOString()
+                    }]
+                }),
+                signal: AbortSignal.timeout(8000)
+            })
+        } catch {}
+    }
+}
+
+// ============================================
+// AUTHENTICATION MIDDLEWARE
+// ============================================
+class AuthMiddleware {
+    constructor(db) {
+        this.db = db
+    }
+
+    getSession(req) {
+        return this.db.sessions[req.headers.authorization]
+    }
+
+    getUser(req) {
+        return this.getSession(req)?.user
+    }
+
+    getRole(req) {
+        const s = this.getSession(req)
+        if (!s) return "guest"
+        if (s.role === "OWNER") return "owner"
+        const u = this.db.users[s.user]
+        return (u && u.role) ? u.role : "member"
+    }
+
+    isOwner(req) {
+        return this.getRole(req) === "owner"
+    }
+
+    isAdminOrOwner(req) {
+        const role = this.getRole(req)
+        return role === "owner" || role === "admin"
+    }
+
+    // Middleware
+    requireAuth(req, res, next) {
+        if (!this.getUser(req)) {
+            return res.json({ err: "Vui lòng đăng nhập" })
+        }
+        next()
+    }
+
+    requireOwner(req, res, next) {
+        if (!this.isOwner(req)) {
+            return res.json({ err: "Yêu cầu quyền Owner" })
+        }
+        next()
+    }
+
+    requireAdminOrOwner(req, res, next) {
+        if (!this.isAdminOrOwner(req)) {
+            return res.json({ err: "Yêu cầu quyền Admin hoặc Owner" })
+        }
+        next()
+    }
+
+    checkApiView(req, api) {
+        if (!api.privateMode) return true
+        const ip = utils.getIP(req)
+        if (api.viewIP && api.viewIP === ip) return true
+        if (api.whitelistIPs && api.whitelistIPs.includes(ip)) return true
+        return false
+    }
+}
+
+// ============================================
+// CREATE EXPRESS APP
+// ============================================
+const app = express()
+const httpServer = http.createServer(app)
+
+// Initialize managers
+const db = new Database()
+const jobManager = new JobManager(db)
+const botManager = new BotManager(db)
+const monitorManager = new MonitorManager(db)
+const auth = new AuthMiddleware(db)
+
+// Middleware
+app.use(compression())
+app.use(cors())
+app.use(express.json({ limit: "10mb" }))
+app.use(express.static("public"))
+
+// Upload middleware
+const upload = multer({
+    dest: "/tmp/bot_uploads/",
+    limits: { fileSize: 5 * 1024 * 1024 }
+})
+
+// ============================================
+// API ROUTES
+// ============================================
+
+// Auth routes
+app.post("/register", async (req, res) => {
+    let { user, pass } = req.body
+    if (!user || !pass) return res.json({ err: "Thiếu user/pass" })
+    if (pass.length < 8) return res.json({ err: "Mật khẩu ít nhất 8 ký tự" })
+    if (/\s/.test(user)) return res.json({ err: "Tên không chứa khoảng trắng" })
+    if (db.users[user]) return res.json({ err: "Tài khoản đã tồn tại" })
     
-    // Validate
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing fields',
-        message: 'Vui lòng nhập đầy đủ username và password'
-      });
+    const isFirst = Object.keys(db.users).length === 0
+    db.users[user] = {
+        pass,
+        createdAt: utils.now(),
+        role: isFirst ? "owner" : "member",
+        avatar: ""
+    }
+    await db.save()
+    res.json({ ok: 1 })
+})
+
+app.post("/login", async (req, res) => {
+    let { user, pass } = req.body
+    
+    if (pass === config.ownerToken) {
+        let token = utils.genToken()
+        if (!db.users[user]) {
+            db.users[user] = {
+                pass: null,
+                createdAt: utils.now(),
+                role: "owner",
+                avatar: ""
+            }
+        }
+        db.sessions[token] = { user, role: "OWNER" }
+        await db.save()
+        return res.json({ token, role: "owner" })
     }
     
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password too short',
-        message: 'Mật khẩu phải có ít nhất 8 ký tự'
-      });
+    let u = db.users[user]
+    if (!u || u.pass !== pass) {
+        return res.json({ err: "Sai thông tin đăng nhập" })
     }
     
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid username',
-        message: 'Username chỉ chứa chữ cái, số và dấu gạch dưới'
-      });
-    }
-    
-    if (users[username]) {
-      return res.status(400).json({
-        success: false,
-        error: 'Username exists',
-        message: 'Tên đăng nhập đã tồn tại'
-      });
-    }
-    
-    // Create user
-    users[username] = {
-      username,
-      password, // In production, hash this!
-      createdAt: new Date().toISOString(),
-      apiCount: 0
-    };
-    
-    console.log(`✅ User registered: ${username}`);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Đăng ký thành công! Vui lòng đăng nhập.',
-      data: { username }
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+    let token = utils.genToken()
+    db.sessions[token] = { user, role: "user" }
+    await db.save()
+    res.json({ token, role: u.role || "member" })
+})
 
-// 2. Login
-app.post('/api/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing fields',
-        message: 'Vui lòng nhập đầy đủ username và password'
-      });
+app.post("/logout", async (req, res) => {
+    const token = req.headers.authorization
+    if (token && db.sessions[token]) {
+        delete db.sessions[token]
+        await db.save()
+        res.json({ ok: 1 })
+    } else {
+        res.json({ err: "Không có phiên" })
     }
-    
-    const user = users[username];
-    if (!user || user.password !== password) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials',
-        message: 'Sai tên đăng nhập hoặc mật khẩu'
-      });
+})
+
+app.get("/me", (req, res) => {
+    let s = auth.getSession(req)
+    if (s) {
+        const u = db.users[s.user]
+        return res.json({
+            user: s.user,
+            role: auth.getRole(req),
+            avatar: u?.avatar || ""
+        })
     }
-    
-    // Create session
-    const token = generateToken();
-    sessions[token] = {
-      user: username,
-      createdAt: Date.now()
-    };
-    
-    console.log(`✅ User logged in: ${username}`);
-    
     res.json({
-      success: true,
-      message: 'Đăng nhập thành công!',
-      data: {
-        token,
-        username,
-        apiCount: user.apiCount || 0,
-        canCreate: (user.apiCount || 0) < MAX_API_PER_USER
-      }
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+        guest: utils.genGuest(utils.getIP(req)),
+        role: "guest",
+        avatar: ""
+    })
+})
 
-// 3. Logout
-app.post('/api/logout', authenticateUser, async (req, res) => {
-  try {
-    const token = req.headers.authorization;
-    if (token && sessions[token]) {
-      delete sessions[token];
+app.post("/set-avatar", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    const { avatar } = req.body
+    if (typeof avatar !== "string" || avatar.length > 300) {
+        return res.json({ err: "Avatar không hợp lệ" })
     }
-    
+    db.users[user] = db.users[user] || {
+        pass: null,
+        createdAt: utils.now(),
+        role: "member",
+        avatar: ""
+    }
+    db.users[user].avatar = avatar
+    await db.save()
+    res.json({ ok: 1, avatar })
+})
+
+app.post("/change-password", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    const { oldPass, newPass } = req.body
+    const u = db.users[user]
+    if (!u) return res.json({ err: "Không tìm thấy" })
+    if (u.pass && u.pass !== oldPass) {
+        return res.json({ err: "Sai mật khẩu hiện tại" })
+    }
+    if (!newPass || newPass.length < 8) {
+        return res.json({ err: "Mật khẩu mới quá ngắn" })
+    }
+    u.pass = newPass
+    await db.save()
+    res.json({ ok: 1 })
+})
+
+app.get("/user/:username", (req, res) => {
+    const u = db.users[req.params.username]
+    if (!u) return res.json({ err: "Không tìm thấy" })
     res.json({
-      success: true,
-      message: 'Đăng xuất thành công'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+        username: req.params.username,
+        avatar: u.avatar || "",
+        role: u.role || "member"
+    })
+})
 
-// 4. Get current user
-app.get('/api/me', authenticateUser, async (req, res) => {
-  try {
-    const user = users[req.user];
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
+// API Management routes
+app.post("/create", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let { name, displayName, webhook, privateMode, viewIP, whitelistIPs } = req.body
+    
+    if (!name) return res.json({ err: "Thiếu tên API" })
+    if (/[^\w]/.test(name)) {
+        return res.json({ err: "Tên API chỉ chứa chữ, số, _" })
     }
     
-    res.json({
-      success: true,
-      data: {
-        username: user.username,
-        createdAt: user.createdAt,
-        apiCount: user.apiCount || 0,
-        canCreate: (user.apiCount || 0) < MAX_API_PER_USER
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// ============ API ENDPOINTS ============
-
-// 1. Create API (requires authentication)
-app.post('/api/create', authenticateUser, async (req, res) => {
-  try {
-    const { name, displayName, webhook, privateMode, whitelistIPs, 
-            prefix, suffix, encode, maxJobsPerBoss, maxTotalJobs, 
-            jobSort, customFields, webhookCustom, ttl, removeDuplicate, viewIP } = req.body;
-    
-    const username = req.user;
-    const user = users[username];
-    
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
-    }
-    
-    // Check API limit
-    if ((user.apiCount || 0) >= MAX_API_PER_USER) {
-      return res.status(403).json({
-        success: false,
-        error: 'API limit reached',
-        message: `Mỗi user chỉ được tạo tối đa ${MAX_API_PER_USER} API. Vui lòng xóa API cũ để tạo mới.`
-      });
-    }
-    
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing name',
-        message: 'Vui lòng nhập tên API'
-      });
-    }
-    
-    // Check name uniqueness
-    for (const key in APIS) {
-      if (APIS[key].name === name) {
-        return res.status(400).json({
-          success: false,
-          error: 'Name exists',
-          message: 'Tên API đã tồn tại. Vui lòng chọn tên khác.'
-        });
-      }
-    }
-
-    const id = generateId();
-    const apiKey = generateApiKey();
-
-    APIS[id] = {
-      id,
-      name,
-      displayName: displayName || name,
-      owner: username,
-      apiKey,
-      webhook: webhook || '',
-      webhookCustom: webhookCustom || null,
-      privateMode: privateMode || false,
-      whitelistIPs: whitelistIPs || [],
-      viewIP: viewIP || '',
-      prefix: prefix || '',
-      suffix: suffix || '',
-      encode: encode || null,
-      maxJobsPerBoss: parseInt(maxJobsPerBoss) || 0,
-      maxTotalJobs: parseInt(maxTotalJobs) || 0,
-      jobSort: jobSort || 'desc',
-      customFields: customFields || null,
-      ttl: parseInt(ttl) || 60000,
-      removeDuplicate: removeDuplicate || false,
-      jobs: {},
-      enabled: true,
-      createdAt: new Date().toISOString(),
-      stats: {
-        totalJobs: 0,
-        bossCount: 0
-      }
-    };
-
-    // Update user API count
-    user.apiCount = (user.apiCount || 0) + 1;
-
-    console.log(`✅ API created: ${name} by ${username} (${id})`);
-
-    res.status(201).json({
-      success: true,
-      message: 'API created successfully',
-      data: {
+    const id = utils.genID()
+    db.apis[id] = {
         id,
-        apiKey,
         name,
         displayName: displayName || name,
-        link: `/api/${id}/all`,
-        remaining: MAX_API_PER_USER - user.apiCount
-      }
-    });
-  } catch (error) {
-    console.error('Create API error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// 2. Get user's APIs
-app.get('/api/my', authenticateUser, async (req, res) => {
-  try {
-    const username = req.user;
-    const userApis = Object.values(APIS).filter(api => api.owner === username);
+        owner: user,
+        jobs: {},
+        webhook: webhook || "",
+        webhookCustom: jobManager.globalDefaults.webhookCustom,
+        encode: jobManager.globalDefaults.encode,
+        prefix: jobManager.globalDefaults.prefix,
+        suffix: jobManager.globalDefaults.suffix,
+        ttl: jobManager.globalDefaults.ttl,
+        removeDuplicate: jobManager.globalDefaults.removeDuplicate,
+        maxJobsPerBoss: jobManager.globalDefaults.maxJobsPerBoss,
+        maxTotalJobs: jobManager.globalDefaults.maxTotalJobs,
+        enabled: true,
+        privateMode: privateMode !== undefined ? utils.toBool(privateMode) : jobManager.globalDefaults.privateMode,
+        viewIP: viewIP || "",
+        whitelistIPs: whitelistIPs || [...(jobManager.globalDefaults.whitelistIPs || [])],
+        jobSort: jobManager.globalDefaults.jobSort,
+        customFields: jobManager.globalDefaults.customFields ? [...jobManager.globalDefaults.customFields] : null,
+        apiKey: utils.genToken()
+    }
     
-    const apiList = userApis.map(api => ({
-      id: api.id,
-      name: api.name,
-      displayName: api.displayName,
-      enabled: api.enabled,
-      privateMode: api.privateMode,
-      totalJobs: api.stats.totalJobs || 0,
-      bossCount: api.stats.bossCount || 0,
-      ttl: api.ttl || 60000,
-      prefix: api.prefix || '',
-      suffix: api.suffix || '',
-      encode: api.encode || null,
-      maxJobsPerBoss: api.maxJobsPerBoss || 0,
-      maxTotalJobs: api.maxTotalJobs || 0,
-      jobSort: api.jobSort || 'desc',
-      customFields: api.customFields || null,
-      webhook: api.webhook || '',
-      webhookCustom: api.webhookCustom || null,
-      removeDuplicate: api.removeDuplicate || false,
-      viewIP: api.viewIP || '',
-      whitelistIPs: api.whitelistIPs || [],
-      apiKey: api.apiKey,
-      createdAt: api.createdAt
-    }));
-
+    await db.save()
     res.json({
-      success: true,
-      data: apiList,
-      total: apiList.length,
-      maxAllowed: MAX_API_PER_USER,
-      remaining: MAX_API_PER_USER - apiList.length
-    });
-  } catch (error) {
-    console.error('Get APIs error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+        ok: 1,
+        id,
+        apiKey: db.apis[id].apiKey,
+        link: `/api/${id}/all`
+    })
+})
 
-// 3. Get single API
-app.get('/api/:id', authenticateUser, async (req, res) => {
-  try {
-    const api = APIS[req.params.id];
-    if (!api) {
-      return res.status(404).json({
-        success: false,
-        error: 'API not found',
-        message: 'Không tìm thấy API'
-      });
+app.get("/my", (req, res) => {
+    let user = auth.getUser(req)
+    if (!user) return res.json([])
+    
+    const apis = auth.isAdminOrOwner(req) ?
+        Object.values(db.apis) :
+        Object.values(db.apis).filter(a => a.owner === user)
+    
+    res.json(apis.map(api => {
+        const bossCounts = {}
+        let total = 0
+        for (let b in api.jobs) {
+            bossCounts[b] = api.jobs[b].length
+            total += api.jobs[b].length
+        }
+        return {
+            id: api.id,
+            displayName: api.displayName,
+            name: api.name,
+            owner: api.owner,
+            totalJobs: total,
+            bosses: bossCounts,
+            enabled: api.enabled,
+            privateMode: api.privateMode,
+            ttl: api.ttl,
+            webhook: !!api.webhook,
+            encode: !!api.encode,
+            prefix: api.prefix || "",
+            suffix: api.suffix || "",
+            removeDuplicate: !!api.removeDuplicate,
+            jobSort: api.jobSort,
+            maxJobsPerBoss: api.maxJobsPerBoss,
+            maxTotalJobs: api.maxTotalJobs,
+            whitelistIPs: api.whitelistIPs || [],
+            customFields: api.customFields || null,
+            viewIP: api.viewIP || "",
+            apiKey: api.apiKey
+        }
+    }))
+})
+
+// Job routes
+app.post("/push", async (req, res) => {
+    let { id, apiKey, job, players, sea, boss } = req.body
+    let api = db.apis[id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!api.enabled) return res.json({ err: "API đang bị tắt" })
+    if (api.apiKey !== apiKey) return res.json({ err: "Sai key" })
+    if (!job) return res.json({ err: "Thiếu job" })
+    if (!boss) return res.json({ err: "Thiếu boss" })
+    
+    boss = String(boss).toLowerCase().trim()
+    let finalJob = utils.encode(job, api.encode)
+    if (api.prefix) finalJob = api.prefix + finalJob
+    if (api.suffix) finalJob = finalJob + api.suffix
+    
+    if (!api.jobs[boss]) api.jobs[boss] = []
+    
+    if (utils.toBool(api.removeDuplicate)) {
+        let ex = api.jobs[boss].find(j => j.job === finalJob)
+        if (ex) {
+            ex.players = Number(players) || 0
+            ex.sea = Number(sea) || 0
+            ex.t = utils.now()
+            jobManager.applyLimits(api)
+            await db.save()
+            return res.json({ ok: 1, update: true })
+        }
     }
-
-    if (api.owner !== req.user) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'Bạn không có quyền truy cập API này'
-      });
+    
+    let data = {
+        job: finalJob,
+        players: Number(players) || 0,
+        sea: Number(sea) || 0,
+        boss,
+        t: utils.now()
     }
+    api.jobs[boss].push(data)
+    jobManager.applyLimits(api)
+    
+    if (api.webhook) {
+        jobManager.sendWebhook(api.webhook, data, api.webhookCustom)
+    }
+    
+    await db.save()
+    res.json({ ok: 1 })
+})
 
+app.post("/push/bulk", async (req, res) => {
+    let { id, apiKey, jobs } = req.body
+    let api = db.apis[id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!api.enabled) return res.json({ err: "API đang bị tắt" })
+    if (api.apiKey !== apiKey) return res.json({ err: "Sai key" })
+    if (!Array.isArray(jobs) || !jobs.length) {
+        return res.json({ err: "Mảng jobs rỗng" })
+    }
+    
+    let added = 0
+    let dup = utils.toBool(api.removeDuplicate)
+    
+    for (let item of jobs) {
+        let { job, players, sea, boss } = item
+        if (!job || !boss) continue
+        
+        boss = String(boss).toLowerCase().trim()
+        let finalJob = utils.encode(job, api.encode)
+        if (api.prefix) finalJob = api.prefix + finalJob
+        if (api.suffix) finalJob = finalJob + api.suffix
+        
+        if (!api.jobs[boss]) api.jobs[boss] = []
+        
+        if (dup) {
+            let ex = api.jobs[boss].find(j => j.job === finalJob)
+            if (ex) {
+                ex.players = Number(players) || 0
+                ex.sea = Number(sea) || 0
+                ex.t = utils.now()
+                added++
+                continue
+            }
+        }
+        
+        api.jobs[boss].push({
+            job: finalJob,
+            players: Number(players) || 0,
+            sea: Number(sea) || 0,
+            boss,
+            t: utils.now()
+        })
+        added++
+        
+        if (api.webhook) {
+            jobManager.sendWebhook(api.webhook, { job: finalJob, players, sea, boss }, api.webhookCustom)
+        }
+    }
+    
+    jobManager.applyLimits(api)
+    await db.save()
+    res.json({ ok: 1, added })
+})
+
+app.get("/api/:id/stats", (req, res) => {
+    let api = db.apis[req.params.id]
+    if (!api) return res.json({ err: "API không tồn tại" })
+    
+    if (!auth.isAdminOrOwner(req) && api.owner !== auth.getUser(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    jobManager.cleanExpiredJobs(api)
+    jobManager.applyLimits(api)
+    
+    const bossCounts = {}
+    let total = 0
+    for (let b in api.jobs) {
+        bossCounts[b] = api.jobs[b].length
+        total += api.jobs[b].length
+    }
+    
     res.json({
-      success: true,
-      data: {
         id: api.id,
-        name: api.name,
         displayName: api.displayName,
-        apiKey: api.apiKey,
-        webhook: api.webhook,
-        webhookCustom: api.webhookCustom,
-        privateMode: api.privateMode,
-        whitelistIPs: api.whitelistIPs,
-        viewIP: api.viewIP,
-        prefix: api.prefix,
-        suffix: api.suffix,
-        encode: api.encode,
+        totalJobs: total,
         maxJobsPerBoss: api.maxJobsPerBoss,
         maxTotalJobs: api.maxTotalJobs,
-        jobSort: api.jobSort,
-        customFields: api.customFields,
-        ttl: api.ttl,
-        removeDuplicate: api.removeDuplicate,
+        bosses: bossCounts,
         enabled: api.enabled,
-        stats: api.stats,
-        createdAt: api.createdAt
-      }
-    });
-  } catch (error) {
-    console.error('Get API error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+        ttl: api.ttl,
+        privateMode: api.privateMode,
+        removeDuplicate: !!api.removeDuplicate
+    })
+})
 
-// 4. Update API
-app.post('/api/update', authenticateUser, async (req, res) => {
-  try {
-    const { id, ...updates } = req.body;
+app.get("/api/:id/:boss?", (req, res) => {
+    let api = db.apis[req.params.id]
+    if (!api) return res.json([])
     
-    const api = APIS[id];
-    if (!api) {
-      return res.status(404).json({
-        success: false,
-        error: 'API not found',
-        message: 'Không tìm thấy API'
-      });
+    if (!auth.checkApiView(req, api)) {
+        return res.json({ err: "IP không được phép" })
     }
-
-    if (api.owner !== req.user) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'Bạn không có quyền chỉnh sửa API này'
-      });
-    }
-
-    // Update fields
-    const allowedFields = ['displayName', 'webhook', 'webhookCustom', 'privateMode', 
-                          'whitelistIPs', 'viewIP', 'prefix', 'suffix', 'encode',
-                          'maxJobsPerBoss', 'maxTotalJobs', 'jobSort', 'customFields',
-                          'ttl', 'removeDuplicate', 'enabled'];
     
-    allowedFields.forEach(field => {
-      if (updates[field] !== undefined) {
-        api[field] = updates[field];
-      }
-    });
-
-    // Update API count if needed
-    if (updates.enabled !== undefined && updates.enabled === false) {
-      // User wants to disable API
-    }
-
-    console.log(`✅ API updated: ${api.name} by ${req.user}`);
-
-    res.json({
-      success: true,
-      message: 'API updated successfully',
-      data: {
-        id: api.id,
-        name: api.name,
-        displayName: api.displayName,
-        enabled: api.enabled
-      }
-    });
-  } catch (error) {
-    console.error('Update API error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// 5. Delete API
-app.delete('/api/:id', authenticateUser, async (req, res) => {
-  try {
-    const api = APIS[req.params.id];
-    if (!api) {
-      return res.status(404).json({
-        success: false,
-        error: 'API not found'
-      });
-    }
-
-    if (api.owner !== req.user) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'Bạn không có quyền xóa API này'
-      });
-    }
-
-    // Update user API count
-    const user = users[req.user];
-    if (user) {
-      user.apiCount = Math.max(0, (user.apiCount || 0) - 1);
-    }
-
-    // Remove API
-    delete APIS[req.params.id];
-    console.log(`🗑️ API deleted: ${api.name} by ${req.user}`);
-
-    res.json({
-      success: true,
-      message: 'API deleted successfully',
-      data: {
-        remaining: MAX_API_PER_USER - (user?.apiCount || 0)
-      }
-    });
-  } catch (error) {
-    console.error('Delete API error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// 6. Toggle API status
-app.post('/api/:id/toggle', authenticateUser, async (req, res) => {
-  try {
-    const api = APIS[req.params.id];
-    if (!api) {
-      return res.status(404).json({
-        success: false,
-        error: 'API not found'
-      });
-    }
-
-    if (api.owner !== req.user) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'Bạn không có quyền thay đổi API này'
-      });
-    }
-
-    api.enabled = !api.enabled;
-    console.log(`🔄 API ${api.name} ${api.enabled ? 'enabled' : 'disabled'} by ${req.user}`);
-
-    res.json({
-      success: true,
-      message: `API ${api.enabled ? 'enabled' : 'disabled'}`,
-      data: { 
-        id: api.id,
-        enabled: api.enabled 
-      }
-    });
-  } catch (error) {
-    console.error('Toggle API error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// 7. Push notification (main endpoint)
-app.post('/api/push', authenticate, (req, res) => {
-  try {
-    const { id, job, players, sea, boss } = req.body;
-    const apiKey = getApiKey(req);
+    jobManager.cleanExpiredJobs(api)
+    jobManager.applyLimits(api)
     
-    // Find API by apiKey
-    let api = null;
-    let apiId = null;
-    for (const [key, value] of Object.entries(APIS)) {
-      if (value.apiKey === apiKey) {
-        api = value;
-        apiId = key;
-        break;
-      }
+    let boss = (req.params.boss || "all").toLowerCase()
+    let sortOrder = (req.query.sort || api.jobSort || "desc") === "asc" ? 1 : -1
+    let page = Math.max(1, parseInt(req.query.page) || 1)
+    let limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 50))
+    let group = req.query.group === "true"
+    
+    if (boss === "stats") {
+        return res.json({ err: "Dùng /api/:id/stats" })
     }
-
-    if (!api) {
-      return res.status(404).json({
-        success: false,
-        error: 'API not found',
-        message: 'Không tìm thấy API với key này'
-      });
+    
+    const resp = {
+        api: {
+            id: api.id,
+            name: api.displayName,
+            owner: api.owner,
+            ttl: api.ttl,
+            encode: !!api.encode,
+            totalJobs: 0
+        },
+        jobs: group ? {} : []
     }
-
-    if (!api.enabled) {
-      return res.status(403).json({
-        success: false,
-        error: 'API disabled',
-        message: 'API đã bị tắt'
-      });
-    }
-
-    // Validate required fields
-    if (!job || !boss || !sea) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields',
-        message: 'Thiếu các trường bắt buộc: job, boss, sea',
-        required: ['job', 'boss', 'sea'],
-        received: Object.keys(req.body)
-      });
-    }
-
-    // Create notification
-    const notification = {
-      id: id || generateId(),
-      job: job,
-      players: parseInt(players) || 0,
-      sea: parseInt(sea),
-      boss: boss.toLowerCase().trim(),
-      timestamp: new Date().toISOString(),
-      receivedAt: Date.now()
-    };
-
-    // Add to API jobs
-    if (!api.jobs[notification.boss]) {
-      api.jobs[notification.boss] = [];
-    }
-    api.jobs[notification.boss].push(notification);
-
-    // Update API stats
-    api.stats.totalJobs = (api.stats.totalJobs || 0) + 1;
-    api.stats.bossCount = Object.keys(api.jobs).length;
-
-    // Update global stats
-    notifications.all.push(notification);
-    notifications.stats.total++;
-
-    // Update boss stats
-    if (notifications.stats.byBoss[notification.boss]) {
-      notifications.stats.byBoss[notification.boss]++;
+    
+    if (boss !== "all") {
+        let jobs = (api.jobs[boss] || []).sort((a, b) => sortOrder * (b.t - a.t))
+        resp.api.totalJobs = jobs.length
+        const sliced = jobs.slice((page - 1) * limit, page * limit)
+            .map(j => jobManager.filterJobFields(j, api.customFields))
+        if (group) resp.jobs[boss] = sliced
+        else resp.jobs = sliced
+        resp.page = page
+        resp.totalPages = Math.ceil(jobs.length / limit)
     } else {
-      notifications.stats.byBoss[notification.boss] = 1;
+        if (group) {
+            let total = 0
+            for (let b in api.jobs) {
+                resp.jobs[b] = [...api.jobs[b]]
+                    .sort((a, bb) => sortOrder * (bb.t - a.t))
+                    .map(j => jobManager.filterJobFields(j, api.customFields))
+                total += api.jobs[b].length
+            }
+            resp.api.totalJobs = total
+        } else {
+            let all = [], total = 0
+            for (let b in api.jobs) {
+                total += api.jobs[b].length
+                all.push(...api.jobs[b].map(j => ({ ...j, boss: b })))
+            }
+            all.sort((a, b) => sortOrder * (b.t - a.t))
+            resp.api.totalJobs = total
+            resp.jobs = all.slice((page - 1) * limit, page * limit)
+                .map(j => jobManager.filterJobFields(j, api.customFields))
+            resp.page = page
+            resp.totalPages = Math.ceil(total / limit)
+        }
     }
+    
+    res.json(resp)
+})
 
-    // Update sea stats
-    if (notification.sea >= 1 && notification.sea <= 3) {
-      notifications.stats.bySea[notification.sea]++;
+app.delete("/api/:id/job", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let api = db.apis[req.params.id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!auth.isAdminOrOwner(req) && api.owner !== user) {
+        return res.json({ err: "Không có quyền" })
     }
-
-    // Update server stats
-    if (notifications.stats.byServer[notification.job]) {
-      notifications.stats.byServer[notification.job]++;
-    } else {
-      notifications.stats.byServer[notification.job] = 1;
+    
+    let { boss, job, index } = req.body
+    if (!boss) return res.json({ err: "Thiếu boss" })
+    
+    boss = boss.toLowerCase()
+    if (!api.jobs[boss]) return res.json({ err: "Boss không có job" })
+    
+    if (index !== undefined) {
+        let i = parseInt(index)
+        if (isNaN(i) || i < 0 || i >= api.jobs[boss].length) {
+            return res.json({ err: "Index không hợp lệ" })
+        }
+        api.jobs[boss].splice(i, 1)
+        if (!api.jobs[boss].length) delete api.jobs[boss]
+        await db.save()
+        return res.json({ ok: 1 })
     }
-
-    notifications.stats.activeServers.add(notification.job);
-    notifications.stats.lastUpdate = new Date().toISOString();
-
-    // Keep only last 1000 notifications
-    if (notifications.all.length > 1000) {
-      notifications.all = notifications.all.slice(-1000);
+    
+    if (job) {
+        const before = api.jobs[boss].length
+        api.jobs[boss] = api.jobs[boss].filter(j => j.job !== job)
+        if (!api.jobs[boss].length) delete api.jobs[boss]
+        if ((api.jobs[boss]?.length ?? 0) === before) {
+            return res.json({ err: "Không tìm thấy job" })
+        }
+        await db.save()
+        return res.json({ ok: 1 })
     }
+    
+    res.json({ err: "Cần job hoặc index" })
+})
 
-    console.log(`📥 [${new Date().toISOString()}] ${notification.boss} | Sea ${notification.sea} | ${notification.players} players`);
-
-    res.status(200).json({
-      success: true,
-      message: 'Notification received',
-      data: notification,
-      stats: {
-        total: notifications.stats.total,
-        activeServers: notifications.stats.activeServers.size
-      }
-    });
-
-  } catch (error) {
-    console.error('Push error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
-
-// 8. Get notifications
-app.get('/api/notifications', (req, res) => {
-  const { sea, boss, limit = 50, offset = 0 } = req.query;
-
-  let filtered = [...notifications.all];
-
-  if (sea) {
-    filtered = filtered.filter(n => n.sea === parseInt(sea));
-  }
-
-  if (boss) {
-    filtered = filtered.filter(n => 
-      n.boss.toLowerCase().includes(boss.toLowerCase())
-    );
-  }
-
-  filtered.sort((a, b) => b.receivedAt - a.receivedAt);
-
-  const start = parseInt(offset);
-  const end = start + parseInt(limit);
-  const paginated = filtered.slice(start, end);
-
-  res.json({
-    success: true,
-    data: paginated,
-    pagination: {
-      total: filtered.length,
-      limit: parseInt(limit),
-      offset: start
-    },
-    stats: {
-      totalNotifications: notifications.stats.total,
-      activeServers: notifications.stats.activeServers.size
+app.delete("/api/:id/clear", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let api = db.apis[req.params.id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!auth.isAdminOrOwner(req) && api.owner !== user) {
+        return res.json({ err: "Không có quyền" })
     }
-  });
-});
+    
+    let { boss } = req.body
+    if (boss) delete api.jobs[boss.toLowerCase()]
+    else api.jobs = {}
+    
+    await db.save()
+    res.json({ ok: 1 })
+})
 
-// 9. Get stats
-app.get('/api/stats', (req, res) => {
-  const bossCount = Object.keys(notifications.stats.byBoss).length;
-  const topBosses = Object.entries(notifications.stats.byBoss)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
-
-  res.json({
-    success: true,
-    data: {
-      server: {
-        uptime: Math.floor(process.uptime()),
-        memory: process.memoryUsage(),
-        timestamp: new Date().toISOString()
-      },
-      stats: {
-        totalNotifications: notifications.stats.total,
-        uniqueBosses: bossCount,
-        activeServers: notifications.stats.activeServers.size,
-        seaDistribution: notifications.stats.bySea,
-        topBosses: topBosses,
-        lastUpdate: notifications.stats.lastUpdate
-      },
-      users: {
-        total: Object.keys(users).length,
-        totalApis: Object.keys(APIS).length
-      }
+app.delete("/api/:id", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let api = db.apis[req.params.id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!auth.isAdminOrOwner(req) && api.owner !== user) {
+        return res.json({ err: "Không có quyền" })
     }
-  });
-});
+    
+    delete db.apis[req.params.id]
+    await db.save()
+    res.json({ ok: 1 })
+})
 
-// 10. Get dashboard data
-app.get('/api/dashboard', (req, res) => {
-  const recent = notifications.all
-    .slice(-20)
-    .reverse()
-    .map(n => ({
-      ...n,
-      timeAgo: Math.floor((Date.now() - n.receivedAt) / 60000) + 'm ago'
-    }));
-
-  const bySea = {
-    'Sea 1': notifications.all.filter(n => n.sea === 1).length,
-    'Sea 2': notifications.all.filter(n => n.sea === 2).length,
-    'Sea 3': notifications.all.filter(n => n.sea === 3).length
-  };
-
-  const topBosses = Object.entries(notifications.stats.byBoss)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name, count]) => ({ name, count }));
-
-  res.json({
-    success: true,
-    data: {
-      overview: {
-        total: notifications.stats.total,
-        activeServers: notifications.stats.activeServers.size,
-        uniqueBosses: Object.keys(notifications.stats.byBoss).length,
-        lastUpdate: notifications.stats.lastUpdate
-      },
-      distribution: {
-        bySea,
-        topBosses
-      },
-      recent
+app.post("/settings", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let {
+        id, encodeText, ttl, webhook, displayName, privateMode, viewIP,
+        removeDuplicate, prefix, suffix, maxJobsPerBoss, maxTotalJobs,
+        enabled, whitelistIPs, jobSort, customFields, webhookCustom
+    } = req.body
+    
+    let api = db.apis[id]
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!auth.isAdminOrOwner(req) && api.owner !== user) {
+        return res.json({ err: "Không có quyền" })
     }
-  });
-});
+    
+    if (encodeText !== undefined) api.encode = utils.parseEncode(encodeText)
+    if (ttl !== undefined) api.ttl = Number(ttl)
+    if (webhook !== undefined) api.webhook = webhook
+    if (displayName !== undefined) api.displayName = displayName
+    if (privateMode !== undefined) api.privateMode = utils.toBool(privateMode)
+    if (viewIP !== undefined) api.viewIP = viewIP
+    if (removeDuplicate !== undefined) api.removeDuplicate = utils.toBool(removeDuplicate)
+    if (prefix !== undefined) api.prefix = String(prefix)
+    if (suffix !== undefined) api.suffix = String(suffix)
+    if (maxJobsPerBoss !== undefined) api.maxJobsPerBoss = Number(maxJobsPerBoss)
+    if (maxTotalJobs !== undefined) api.maxTotalJobs = Number(maxTotalJobs)
+    if (enabled !== undefined) api.enabled = utils.toBool(enabled)
+    if (whitelistIPs !== undefined) api.whitelistIPs = Array.isArray(whitelistIPs) ? whitelistIPs : []
+    if (jobSort !== undefined && ["asc", "desc"].includes(jobSort)) api.jobSort = jobSort
+    if (customFields !== undefined) api.customFields = Array.isArray(customFields) ? customFields : null
+    if (webhookCustom !== undefined) api.webhookCustom = webhookCustom
+    
+    jobManager.applyLimits(api)
+    await db.save()
+    res.json({ ok: 1 })
+})
 
-// 11. Clear all data
-app.delete('/api/clear', authenticateUser, async (req, res) => {
-  try {
-    // Only allow if user has admin role or specific permission
-    const count = notifications.all.length;
-    notifications.all = [];
-    notifications.stats = {
-      total: 0,
-      byBoss: {},
-      bySea: { 1: 0, 2: 0, 3: 0 },
-      byServer: {},
-      lastUpdate: null,
-      activeServers: new Set()
-    };
+app.put("/api/:id/rename", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let api = db.apis[req.params.id]
+    
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!auth.isAdminOrOwner(req) && api.owner !== user) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    const { displayName } = req.body
+    if (displayName !== undefined) {
+        if (typeof displayName !== "string" || !displayName.trim()) {
+            return res.json({ err: "Tên hiển thị không hợp lệ" })
+        }
+        api.displayName = displayName.trim()
+        await db.save()
+        return res.json({ ok: 1, displayName: api.displayName })
+    }
+    res.json({ err: "Thiếu displayName" })
+})
 
-    console.log(`🗑️ Cleared ${count} notifications by ${req.user}`);
+// Admin/Owner routes
+app.get("/owner", auth.requireAdminOrOwner, (req, res) => {
+    res.json(db.data)
+})
 
+app.post("/owner/edit", auth.requireOwner, async (req, res) => {
+    let {
+        id, encodeText, ttl, webhook, displayName, privateMode, viewIP,
+        removeDuplicate, prefix, suffix, maxJobsPerBoss, maxTotalJobs,
+        enabled, whitelistIPs, jobSort, customFields, webhookCustom
+    } = req.body
+    
+    let api = db.apis[id]
+    if (!api) return res.json({ err: "API không tồn tại" })
+    
+    if (encodeText !== undefined) api.encode = utils.parseEncode(encodeText)
+    if (ttl !== undefined) api.ttl = Number(ttl)
+    if (webhook !== undefined) api.webhook = webhook
+    if (displayName !== undefined) api.displayName = displayName
+    if (privateMode !== undefined) api.privateMode = utils.toBool(privateMode)
+    if (viewIP !== undefined) api.viewIP = viewIP
+    if (removeDuplicate !== undefined) api.removeDuplicate = utils.toBool(removeDuplicate)
+    if (prefix !== undefined) api.prefix = String(prefix)
+    if (suffix !== undefined) api.suffix = String(suffix)
+    if (maxJobsPerBoss !== undefined) api.maxJobsPerBoss = Number(maxJobsPerBoss)
+    if (maxTotalJobs !== undefined) api.maxTotalJobs = Number(maxTotalJobs)
+    if (enabled !== undefined) api.enabled = utils.toBool(enabled)
+    if (whitelistIPs !== undefined) api.whitelistIPs = Array.isArray(whitelistIPs) ? whitelistIPs : []
+    if (jobSort !== undefined && ["asc", "desc"].includes(jobSort)) api.jobSort = jobSort
+    if (customFields !== undefined) api.customFields = Array.isArray(customFields) ? customFields : null
+    if (webhookCustom !== undefined) api.webhookCustom = webhookCustom
+    
+    jobManager.applyLimits(api)
+    await db.save()
+    res.json({ ok: 1 })
+})
+
+app.get("/owner/stats", auth.requireOwner, (req, res) => {
+    let totalJobs = 0
+    Object.values(db.apis).forEach(api => {
+        Object.values(api.jobs).forEach(arr => totalJobs += arr.length)
+    })
+    
     res.json({
-      success: true,
-      message: `Cleared ${count} notifications`,
-      cleared: count
-    });
-  } catch (error) {
-    console.error('Clear data error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-});
+        totalApis: Object.keys(db.apis).length,
+        totalJobs,
+        totalUsers: Object.keys(db.users).length,
+        activeSessions: Object.keys(db.sessions).length,
+        totalBots: Object.keys(db.bots).length,
+        runningBots: Object.values(db.bots).filter(b => b.status === "running").length,
+        totalMonitors: Object.keys(db.monitors).length,
+        onlineMonitors: Object.values(db.monitors).filter(m => m.lastStatus === "online").length
+    })
+})
 
-// ============ 404 HANDLER ============
+app.post("/owner/global-settings", auth.requireOwner, async (req, res) => {
+    let {
+        ttl, prefix, suffix, encodeText, removeDuplicate,
+        maxJobsPerBoss, maxTotalJobs, enabled, privateMode,
+        whitelistIPs, jobSort, customFields, webhookCustom
+    } = req.body
+    
+    const g = jobManager.globalDefaults
+    if (ttl !== undefined) g.ttl = Number(ttl)
+    if (prefix !== undefined) g.prefix = String(prefix)
+    if (suffix !== undefined) g.suffix = String(suffix)
+    if (encodeText !== undefined) g.encode = utils.parseEncode(encodeText)
+    if (removeDuplicate !== undefined) g.removeDuplicate = utils.toBool(removeDuplicate)
+    if (maxJobsPerBoss !== undefined) g.maxJobsPerBoss = Number(maxJobsPerBoss)
+    if (maxTotalJobs !== undefined) g.maxTotalJobs = Number(maxTotalJobs)
+    if (enabled !== undefined) g.enabled = utils.toBool(enabled)
+    if (privateMode !== undefined) g.privateMode = utils.toBool(privateMode)
+    if (whitelistIPs !== undefined) g.whitelistIPs = Array.isArray(whitelistIPs) ? whitelistIPs : []
+    if (jobSort !== undefined && ["asc", "desc"].includes(jobSort)) g.jobSort = jobSort
+    if (customFields !== undefined) g.customFields = Array.isArray(customFields) ? customFields : null
+    if (webhookCustom !== undefined) g.webhookCustom = webhookCustom
+    
+    await db.save()
+    res.json({ ok: 1, globalDefaults: g })
+})
 
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Endpoint not found',
-    message: 'Đường dẫn không tồn tại',
-    path: req.path,
-    method: req.method
-  });
-});
+app.get("/owner/global-settings", auth.requireOwner, (req, res) => {
+    res.json(jobManager.globalDefaults)
+})
 
-// ============ ERROR HANDLER ============
+app.post("/owner/reset-api-key", auth.requireOwner, async (req, res) => {
+    let api = db.apis[req.body.id]
+    if (!api) return res.json({ err: "API không tồn tại" })
+    api.apiKey = utils.genToken()
+    await db.save()
+    res.json({ ok: 1, apiKey: api.apiKey })
+})
 
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-    message: err.message
-  });
-});
+app.post("/owner/change-owner", auth.requireOwner, async (req, res) => {
+    let { id, newOwner } = req.body
+    let api = db.apis[id]
+    if (!api) return res.json({ err: "API không tồn tại" })
+    if (!newOwner || !db.users[newOwner]) {
+        return res.json({ err: "Người dùng không tồn tại" })
+    }
+    api.owner = newOwner
+    await db.save()
+    res.json({ ok: 1 })
+})
 
-// ============ START SERVER ============
+app.post("/owner/clean-all-expired", auth.requireAdminOrOwner, async (req, res) => {
+    Object.values(db.apis).forEach(api => {
+        jobManager.cleanExpiredJobs(api)
+        jobManager.applyLimits(api)
+    })
+    await db.save()
+    res.json({ ok: 1 })
+})
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`
-╔═══════════════════════════════════════════════════╗
-║   🚀 NOTI API Server Started                     ║
-╠═══════════════════════════════════════════════════╣
-║  Port:        ${String(PORT).padEnd(38)}║
-║  URL:         http://localhost:${PORT}${' '.repeat(38 - `http://localhost:${PORT}`.length)}║
-║  Environment: ${(process.env.NODE_ENV || 'development').padEnd(38)}║
-╠═══════════════════════════════════════════════════╣
-║  📊 Dashboard: http://localhost:${PORT}/dashboard${' '.repeat(38 - `http://localhost:${PORT}/dashboard`.length)}║
-║  🔐 Login:     http://localhost:${PORT}/login${' '.repeat(38 - `http://localhost:${PORT}/login`.length)}║
-║  📡 API:       http://localhost:${PORT}/api${' '.repeat(38 - `http://localhost:${PORT}/api`.length)}║
-║  ❤️  Health:    http://localhost:${PORT}/health${' '.repeat(38 - `http://localhost:${PORT}/health`.length)}║
-╚═══════════════════════════════════════════════════╝
-  `);
-  
-  console.log('✅ Server is ready to receive notifications!\n');
-  console.log(`👥 Users: ${Object.keys(users).length}`);
-  console.log(`📦 APIs: ${Object.keys(APIS).length}`);
-  console.log(`📊 Notifications: ${notifications.all.length}`);
-});
+app.post("/owner/set-role", auth.requireOwner, async (req, res) => {
+    let { user, role } = req.body
+    if (!user || !role || !db.users[user]) {
+        return res.json({ err: "Thiếu thông tin hoặc user không tồn tại" })
+    }
+    if (!["member", "admin"].includes(role)) {
+        return res.json({ err: "Role không hợp lệ" })
+    }
+    db.users[user].role = role
+    await db.save()
+    res.json({ ok: 1, user, newRole: role })
+})
 
-// ============ GRACEFUL SHUTDOWN ============
+app.get("/admin/users", auth.requireAdminOrOwner, (req, res) => {
+    res.json(Object.entries(db.users).map(([username, data]) => ({
+        username,
+        role: data.role || "member",
+        avatar: data.avatar || "",
+        createdAt: data.createdAt
+    })))
+})
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing server...');
-  process.exit(0);
-});
+app.post("/admin/set-role", auth.requireAdminOrOwner, async (req, res) => {
+    let { user, role } = req.body
+    if (!user || !role || !db.users[user]) {
+        return res.json({ err: "Thiếu thông tin hoặc user không tồn tại" })
+    }
+    if (!["member", "admin"].includes(role)) {
+        return res.json({ err: "Role không hợp lệ" })
+    }
+    if (db.users[user].role === "owner") {
+        return res.json({ err: "Không thể thay đổi role của owner" })
+    }
+    db.users[user].role = role
+    await db.save()
+    res.json({ ok: 1, user, newRole: role })
+})
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, closing server...');
-  process.exit(0);
-});
+// Bot routes
+app.post("/bot/create", auth.requireAuth, upload.single("file"), async (req, res) => {
+    let user = auth.getUser(req)
+    let { name, env, autoRestart } = req.body
+    
+    if (!name) return res.json({ err: "Thiếu tên bot" })
+    
+    if (!auth.isAdminOrOwner(req)) {
+        const existing = Object.values(db.bots).filter(b => b.owner === user)
+        if (existing.length >= config.botLimitUser) {
+            return res.json({
+                err: `Mỗi tài khoản chỉ được host ${config.botLimitUser} bot Discord. Xóa bot cũ trước!`
+            })
+        }
+    }
+    
+    let code = ""
+    if (req.file) {
+        code = fs.readFileSync(req.file.path, "utf8")
+        fs.unlinkSync(req.file.path)
+    } else if (req.body.code) {
+        code = req.body.code
+    } else {
+        return res.json({ err: "Cần upload file .py hoặc gửi code" })
+    }
+    
+    let envObj = {}
+    try { envObj = JSON.parse(env || "{}") } catch {}
+    
+    const id = utils.genID()
+    db.bots[id] = {
+        id,
+        name,
+        owner: user,
+        code: Buffer.from(code).toString("base64"),
+        env: envObj,
+        status: "stopped",
+        pid: null,
+        logs: [],
+        autoRestart: utils.toBool(autoRestart || false),
+        restartCount: 0,
+        created_at: utils.now(),
+        updated_at: utils.now()
+    }
+    
+    await db.save()
+    res.json({ ok: 1, id })
+})
+
+app.get("/bot/my", (req, res) => {
+    let user = auth.getUser(req)
+    if (!user) return res.json([])
+    
+    res.json(Object.values(db.bots)
+        .filter(b => b.owner === user || auth.isAdminOrOwner(req))
+        .map(b => ({
+            id: b.id,
+            name: b.name,
+            status: b.status,
+            autoRestart: b.autoRestart || false,
+            restartCount: b.restartCount || 0,
+            envKeys: Object.keys(b.env || {}),
+            created_at: b.created_at,
+            updated_at: b.updated_at
+        }))
+    )
+})
+
+app.post("/bot/:id/start", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let bot = db.bots[req.params.id]
+    
+    if (!bot) return res.json({ err: "Bot không tồn tại" })
+    if (bot.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    if (bot.status === "running") {
+        return res.json({ err: "Bot đang chạy" })
+    }
+    
+    bot.logs = []
+    bot.restartCount = 0
+    bot.autoRestart = utils.toBool(req.body.autoRestart !== undefined ?
+        req.body.autoRestart : bot.autoRestart)
+    
+    botManager.spawn(bot)
+    await db.save()
+    res.json({ ok: 1, pid: bot.pid })
+})
+
+app.post("/bot/:id/stop", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let bot = db.bots[req.params.id]
+    
+    if (!bot) return res.json({ err: "Bot không tồn tại" })
+    if (bot.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    const success = botManager.stop(req.params.id)
+    if (success) {
+        res.json({ ok: 1 })
+    } else {
+        res.json({ err: "Không thể dừng bot" })
+    }
+})
+
+app.delete("/bot/:id", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let bot = db.bots[req.params.id]
+    
+    if (!bot) return res.json({ err: "Bot không tồn tại" })
+    if (bot.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    const success = botManager.delete(req.params.id)
+    if (success) {
+        res.json({ ok: 1 })
+    } else {
+        res.json({ err: "Không thể xóa bot" })
+    }
+})
+
+app.get("/bot/:id/logs", (req, res) => {
+    let user = auth.getUser(req)
+    let bot = db.bots[req.params.id]
+    
+    if (!bot) return res.json({ err: "Bot không tồn tại" })
+    if (bot.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    res.json({
+        logs: bot.logs.slice(-100),
+        status: bot.status,
+        restartCount: bot.restartCount || 0
+    })
+})
+
+app.put("/bot/:id/rename", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let bot = db.bots[req.params.id]
+    
+    if (!bot) return res.json({ err: "Bot không tồn tại" })
+    if (bot.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    const { name } = req.body
+    if (!name || typeof name !== "string" || !name.trim()) {
+        return res.json({ err: "Tên mới không hợp lệ" })
+    }
+    
+    bot.name = name.trim()
+    bot.updated_at = utils.now()
+    await db.save()
+    res.json({ ok: 1, name: bot.name })
+})
+
+// Monitor routes
+app.post("/monitor/create", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let { name, url, interval, webhook } = req.body
+    
+    if (!name || !url) return res.json({ err: "Thiếu name hoặc url" })
+    if (!url.startsWith("http")) {
+        return res.json({ err: "URL phải bắt đầu bằng http/https" })
+    }
+    
+    const id = utils.genID()
+    db.monitors[id] = {
+        id,
+        name,
+        url,
+        owner: user,
+        interval: Math.max(30000, Number(interval) || 60000),
+        webhook: webhook || "",
+        lastStatus: "waiting",
+        lastPing: 0,
+        lastCode: 0,
+        lastError: null,
+        lastCheck: 0,
+        totalChecks: 0,
+        goodChecks: 0,
+        uptime: "0.00",
+        retry: 0,
+        history: [],
+        created_at: utils.now()
+    }
+    
+    await db.save()
+    monitorManager.check(db.monitors[id])
+    res.json({ ok: 1, id })
+})
+
+app.get("/monitor/my", (req, res) => {
+    let user = auth.getUser(req)
+    if (!user) return res.json([])
+    
+    res.json(Object.values(db.monitors)
+        .filter(m => m.owner === user || auth.isAdminOrOwner(req))
+    )
+})
+
+app.delete("/monitor/:id", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let m = db.monitors[req.params.id]
+    
+    if (!m) return res.json({ err: "Monitor không tồn tại" })
+    if (m.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    delete db.monitors[req.params.id]
+    await db.save()
+    res.json({ ok: 1 })
+})
+
+app.get("/monitor/:id", (req, res) => {
+    const m = db.monitors[req.params.id]
+    if (!m) return res.json({ err: "Không tìm thấy" })
+    res.json(m)
+})
+
+app.put("/monitor/:id/rename", auth.requireAuth, async (req, res) => {
+    let user = auth.getUser(req)
+    let mon = db.monitors[req.params.id]
+    
+    if (!mon) return res.json({ err: "Monitor không tồn tại" })
+    if (mon.owner !== user && !auth.isAdminOrOwner(req)) {
+        return res.json({ err: "Không có quyền" })
+    }
+    
+    const { name } = req.body
+    if (!name || typeof name !== "string" || !name.trim()) {
+        return res.json({ err: "Tên mới không hợp lệ" })
+    }
+    
+    mon.name = name.trim()
+    await db.save()
+    res.json({ ok: 1, name: mon.name })
+})
+
+// ============================================
+// WEBSOCKET SERVER
+// ============================================
+const wss = new WebSocket.Server({ server: httpServer, path: "/ws" })
+const chatMessages = []
+const chatClients = new Map()
+
+wss.on("connection", (ws, req) => {
+    const token = new URL(req.url, `http://${req.headers.host}`).searchParams.get("token") || ""
+    const session = db.sessions[token]
+    
+    if (!session) {
+        ws.close(4001, "Unauthorized")
+        return
+    }
+    
+    const username = session.user
+    const avatar = db.users[username]?.avatar || ""
+    chatClients.set(ws, { username, avatar })
+    
+    ws.send(JSON.stringify({
+        type: "history",
+        messages: chatMessages.slice(-config.maxChatMessages)
+    }))
+    
+    ws.on("message", raw => {
+        let msg
+        try { msg = JSON.parse(raw) } catch { return }
+        
+        if (msg.type === "msg" &&
+            typeof msg.content === "string" &&
+            msg.content.trim().length > 0 &&
+            msg.content.length <= 500) {
+            const chatMsg = {
+                user: username,
+                avatar,
+                content: msg.content.trim(),
+                timestamp: utils.now()
+            }
+            chatMessages.push(chatMsg)
+            if (chatMessages.length > config.maxChatMessages) {
+                chatMessages.shift()
+            }
+            broadcast({ type: "msg", ...chatMsg })
+        }
+    })
+    
+    ws.on("close", () => chatClients.delete(ws))
+    ws.on("error", () => chatClients.delete(ws))
+})
+
+function broadcast(payload) {
+    const data = JSON.stringify(payload)
+    for (const [ws] of chatClients) {
+        try { ws.send(data) } catch {}
+    }
+}
+
+// ============================================
+// BACKGROUND TASKS
+// ============================================
+setInterval(() => {
+    // Clean expired jobs
+    Object.values(db.apis).forEach(api => {
+        jobManager.cleanExpiredJobs(api)
+        jobManager.applyLimits(api)
+    })
+    
+    // Check monitors
+    Object.values(db.monitors).forEach(m => {
+        if (utils.now() - (m.lastCheck || 0) >= (m.interval || 60000)) {
+            monitorManager.check(m)
+        }
+    })
+    
+    db.save()
+}, 15000)
+
+setInterval(() => db.write(), 450000)
+
+// ============================================
+// GRACEFUL SHUTDOWN
+// ============================================
+process.on("SIGTERM", async () => {
+    await db.write()
+    process.exit(0)
+})
+
+process.on("SIGINT", async () => {
+    await db.write()
+    process.exit(0)
+})
+
+process.on("uncaughtException", async (err) => {
+    console.error("Uncaught exception:", err)
+    await db.write()
+})
+
+// ============================================
+// SPA FALLBACK
+// ============================================
+app.get("*", (req, res) => {
+    if (!req.path.startsWith("/api") && !req.path.startsWith("/ws")) {
+        res.sendFile(path.join(__dirname, "public", "index.html"))
+    }
+})
+
+// ============================================
+// START SERVER
+// ============================================
+async function start() {
+    try {
+        // Install discord.py if needed
+        try {
+            execSync("python3 -m pip install --user discord.py aiohttp", { stdio: "ignore" })
+        } catch (e) {}
+        
+        // Create uploads directory
+        if (!fs.existsSync("/tmp/bot_uploads")) {
+            fs.mkdirSync("/tmp/bot_uploads", { recursive: true })
+        }
+        
+        // Load database
+        await db.load()
+        
+        // Start HTTP server
+        httpServer.listen(config.port, () => {
+            console.log(`🚀 Server running on port ${config.port}`)
+            console.log(`📊 Dashboard: http://localhost:${config.port}`)
+        })
+    } catch (error) {
+        console.error("Failed to start server:", error)
+        process.exit(1)
+    }
+}
+
+start()
