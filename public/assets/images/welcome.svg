@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="welcomeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <circle cx="100" cy="100" r="80" fill="url(#welcomeGrad)" opacity="0.05"/>
+  
+  <!-- Star -->
+  <g transform="translate(100, 80)">
+    <polygon points="0,-40 10,-15 35,-15 15,0 25,25 0,10 -25,25 -15,0 -35,-15 -10,-15" 
+             fill="url(#welcomeGrad)" opacity="0.8"/>
+    <polygon points="0,-30 7,-12 25,-12 10,0 18,20 0,8 -18,20 -10,0 -25,-12 -7,-12" 
+             fill="white" opacity="0.4"/>
+  </g>
+  
+  <!-- Sparkles -->
+  <circle cx="50" cy="50" r="3" fill="url(#welcomeGrad)" opacity="0.3">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="150" cy="50" r="3" fill="url(#welcomeGrad)" opacity="0.3">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="2.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="50" cy="150" r="3" fill="url(#welcomeGrad)" opacity="0.3">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="150" cy="150" r="3" fill="url(#welcomeGrad)" opacity="0.3">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  
+  <!-- Welcome text -->
+  <text x="100" y="145" font-size="16" text-anchor="middle" fill="url(#welcomeGrad)" font-family="Arial, sans-serif" font-weight="bold">
+    Welcome!
+  </text>
+</svg>

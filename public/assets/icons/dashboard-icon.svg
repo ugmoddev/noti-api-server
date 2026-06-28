@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="dashGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <circle cx="50" cy="50" r="45" fill="url(#dashGrad)" opacity="0.15"/>
+  <circle cx="50" cy="50" r="35" fill="url(#dashGrad)" opacity="0.25"/>
+  
+  <!-- Dashboard grid -->
+  <rect x="22" y="22" width="24" height="24" rx="4" fill="url(#dashGrad)" opacity="0.6"/>
+  <rect x="54" y="22" width="24" height="24" rx="4" fill="url(#dashGrad)" opacity="0.8"/>
+  <rect x="22" y="54" width="24" height="24" rx="4" fill="url(#dashGrad)" opacity="0.8"/>
+  <rect x="54" y="54" width="24" height="24" rx="4" fill="url(#dashGrad)" opacity="0.6"/>
+  
+  <!-- Inner squares -->
+  <rect x="27" y="27" width="14" height="14" rx="2" fill="white" opacity="0.3"/>
+  <rect x="59" y="27" width="14" height="14" rx="2" fill="white" opacity="0.3"/>
+  <rect x="27" y="59" width="14" height="14" rx="2" fill="white" opacity="0.3"/>
+  <rect x="59" y="59" width="14" height="14" rx="2" fill="white" opacity="0.3"/>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="loadGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <circle cx="50" cy="50" r="40" fill="none" stroke="url(#loadGrad)" stroke-width="6" opacity="0.1"/>
+  
+  <!-- Spinner -->
+  <circle cx="50" cy="50" r="40" fill="none" stroke="url(#loadGrad)" stroke-width="6" stroke-dasharray="60 190" stroke-linecap="round">
+    <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="1s" repeatCount="indefinite"/>
+  </circle>
+  
+  <!-- Center dot -->
+  <circle cx="50" cy="50" r="4" fill="url(#loadGrad)">
+    <animate attributeName="r" values="4;6;4" dur="1s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="1;0.5;1" dur="1s" repeatCount="indefinite"/>
+  </circle>
+</svg>
