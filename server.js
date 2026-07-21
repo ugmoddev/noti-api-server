@@ -306,17 +306,25 @@ class Database {
     }
 
     // Save with debounce
+    // All calls made while a debounce window is pending share the SAME
+    // underlying write, and ALL of their promises resolve once that write
+    // finishes (previously, only the most recent caller's promise resolved,
+    // and every earlier caller within the 300ms window hung forever).
     save() {
+        if (!this.saveWaiters) this.saveWaiters = []
+
         return new Promise((resolve) => {
+            this.saveWaiters.push(resolve)
             if (this.saveTimeout) clearTimeout(this.saveTimeout)
             this.saveTimeout = setTimeout(() => {
-                if (this.pendingWrite) { resolve(); return }
-                this.pendingWrite = true
+                this.saveTimeout = null
+                const waiters = this.saveWaiters
+                this.saveWaiters = []
                 this.writeQueue = this.writeQueue
                     .then(() => this.write())
+                    .catch((e) => console.error("db.write error:", e.message))
                     .finally(() => {
-                        this.pendingWrite = false
-                        resolve()
+                        waiters.forEach(r => r())
                     })
             }, 300)
         })
@@ -710,6 +718,14 @@ class MonitorManager {
 class AuthMiddleware {
     constructor(db) {
         this.db = db
+        // Bind methods so `this` stays correct when passed as bare
+        // middleware references (e.g. `auth.requireAuth` in app.post(...)).
+        // Without this, `this` is `undefined` inside the method (class bodies
+        // run in strict mode) and every protected route (create API, create
+        // bot, create monitor, settings, admin, etc.) crashes with a 500 error.
+        this.requireAuth = this.requireAuth.bind(this)
+        this.requireOwner = this.requireOwner.bind(this)
+        this.requireAdminOrOwner = this.requireAdminOrOwner.bind(this)
     }
 
     getSession(req) {
